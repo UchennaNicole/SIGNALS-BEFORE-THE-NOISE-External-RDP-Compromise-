@@ -102,7 +102,16 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1593.001 | Search Open Websites/Domains: Social Media | Reconnaissance | 🟠 High |
 | T1594 | Search Victim-Owned Websites | Reconnaissance | 🟡 Medium |
 | T1589 | Gather Victim Identity Information | Reconnaissance | 🟠 High |
-| T1591 | Gather Victim Org Information | Reconnaissance | 🟡 Medium |
+| T1591 | Gather Victim Org Information | Reconnaissance | 🟡 Medium | The LinkedIn post by Sarah Chen is a direct instance of an adversary (or 
+potential adversary) being able to harvest organisational and infrastructure 
+intelligence from social media. The photo exposed:
+- The company identity (PHTG)
+- An active cloud console session
+- VM naming conventions
+- Enough context to begin targeted scanning
+
+This single social media post compressed the reconnaissance phase from days 
+to minutes for a motivated threat actor.
 | 2 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 3 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 4 | <Placeholder> | <Placeholder> | <Placeholder> |
