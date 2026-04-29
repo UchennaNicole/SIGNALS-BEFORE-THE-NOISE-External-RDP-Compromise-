@@ -98,7 +98,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 
 | Flag | Technique Category | MITRE ID | Priority |
 |-----:|-------------------|----------|----------|
-| 1 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 1 | | T1593 | Search Open Websites/Domains | Reconnaissance | 🟡 Medium |
+| T1593.001 | Search Open Websites/Domains: Social Media | Reconnaissance | 🟠 High |
+| T1594 | Search Victim-Owned Websites | Reconnaissance | 🟡 Medium |
+| T1589 | Gather Victim Identity Information | Reconnaissance | 🟠 High |
+| T1591 | Gather Victim Org Information | Reconnaissance | 🟡 Medium |
 | 2 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 3 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 4 | <Placeholder> | <Placeholder> | <Placeholder> |
