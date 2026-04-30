@@ -119,7 +119,10 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1589.002 | Gather Victim Identity Information: Email Addresses | Reconnaissance | 🟠 High |
 | T1591.004 | Gather Victim Org Information: Identify Roles | Reconnaissance | 🟠 High |
 | T1590.005 | Gather Victim Network Information: IP Addresses | Reconnaissance | 🔴 Critical |
-| 6 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 6 | | T1595.001 | Active Scanning: Scanning IP Blocks | Reconnaissance | 🔴 Critical 
+| T1595 | Active Scanning | Reconnaissance | 🔴 Critical 
+| T1590.005 | Gather Victim Network Information: IP Addresses | Reconnaissance | 🟠 High 
+| T1133 | External Remote Services | Initial Access | 🔴 Critical |
 | 7 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 8 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 9 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -602,34 +605,102 @@ as a social engineering lure.
 <summary id="-flag-6">🚩 <strong>Flag 6: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify the most appropriate telemetry source to determine whether the 
+exposed public IP address (`74.249.82.162`) associated with `azwks-phtg-02` 
+was actively scanned or enumerated following the LinkedIn post, and establish 
+the correct data source to pivot into for network-level investigation.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: D — Azure network or platform analytics related to inbound 
+connections.**
+
+To determine whether a public IP was scanned or enumerated, the first 
+telemetry source to review is network-level data capturing inbound 
+connection attempts. In this investigation environment, that telemetry 
+is available via **Microsoft Defender for Endpoint (MDE) 
+`DeviceNetworkEvents`** — which captures inbound and outbound connection 
+activity at the endpoint level, including connection attempts, accepted 
+connections, and the remote IPs involved.
+
 
 ### 🔍 Evidence
 
 | Field | Value |
 |------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+| Host | azwks-phtg-02 |
+| Target Telemetry Source | DeviceNetworkEvents (MDE) |
+| Platform | Microsoft Sentinel |
+| Workspace | law-cyber-range |
+| Correct Answer | D |
+| Timestamp | N/A — Query design phase |
+| Process | N/A — No process execution involved |
+| Parent Process | N/A — No process execution involved |
+| Command Line | N/A — No process execution involved |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+Choosing the correct telemetry source at the start of an investigation 
+determines how quickly and accurately a threat hunter can confirm or 
+deny a hypothesis. In this case the hypothesis is:
+
+> *"Did anyone scan or enumerate the exposed public IP after the 
+> LinkedIn post went live?"*
+
+Network telemetry is the only source that can answer this directly because:
+- **Scanning precedes authentication** — it happens before any credentials 
+  are used, so auth logs would miss it entirely
+- **It captures raw connection attempts** — including those that never 
+  result in a successful session
+- **It records source IPs** — enabling geographic enrichment and 
+  threat intelligence correlation
+- **It is host-level** — MDE `DeviceNetworkEvents` captures this data 
+  directly on the endpoint, making it available even if Azure-level 
+  NSG flow logs are not configured
+
+In this investigation, `DeviceNetworkEvents` revealed 325 events 
+targeting port 3389 from 225 unique source IPs across 17 countries — 
+confirming that the exposed VM was actively targeted following the 
+LinkedIn post.
 
 ### 🔧 KQL Query Used
-<Add KQL here>
-
+```kql
+// Initial query to assess inbound network activity against the exposed VM
+DeviceNetworkEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LocalPort == 3389
+| summarize count() by ActionType, RemoteIPType
+| order by count_ desc
+```
 ### 🖼️ Screenshot
-<Insert screenshot>
+![DeviceNetworkEvents RDP Scan](screenshots/q06_devicenetworkevents_rdp_scan.png)
 
 ### 🛠️ Detection Recommendation
 
 **Hunting Tip:**  
-<Actionable guidance for defenders>
+- **Enable MDE `DeviceNetworkEvents` logging** across all endpoints 
+  — particularly those with public IP associations. This is the 
+  primary telemetry source for detecting inbound scanning and 
+  enumeration activity
+- **Configure Azure NSG Flow Logs** and send them to a Log Analytics 
+  workspace to provide an additional network-level view of inbound 
+  traffic, complementing MDE endpoint telemetry
+- **Build a baseline of expected inbound connections** for each 
+  internet-facing VM. Any deviation — particularly high-volume 
+  inbound attempts on port 3389 from public IPs — should trigger 
+  an immediate alert
+- **Create a Sentinel Scheduled Query Rule** to alert on more than 
+  a defined threshold of unique public source IPs connecting to 
+  port 3389 within a one-hour window:
+
+```kql
+// Detection rule — mass RDP scanning alert
+DeviceNetworkEvents
+| where LocalPort == 3389
+| where RemoteIPType == "Public"
+| where TimeGenerated > ago(1h)
+| summarize UniqueSourceIPs = dcount(RemoteIP) by DeviceName
+| where UniqueSourceIPs > 10
+```
 
 </details>
 
