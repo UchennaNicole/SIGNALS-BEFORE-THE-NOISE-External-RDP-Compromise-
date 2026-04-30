@@ -111,7 +111,10 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1593 | Search Open Websites/Domains | Reconnaissance | 🟠 High |
 | T1590 | Gather Victim Network Information | Reconnaissance | 🟠 High |
 | T1595.001 | Active Scanning: Scanning IP Blocks | Reconnaissance | 🟡 Medium |
-| 4 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 4 | | T1590.005 | Gather Victim Network Information: IP Addresses | Reconnaissance | 🔴 Critical |
+| T1590 | Gather Victim Network Information | Reconnaissance | 🟠 High |
+| T1595 | Active Scanning | Reconnaissance | 🟠 High |
+| T1133 | External Remote Services | Initial Access | 🔴 Critical |
 | 5 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 6 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 7 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -406,34 +409,91 @@ DeviceNetworkEvents
 <summary id="-flag-4">🚩 <strong>Flag 4: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Determine which specific detail visible in the Azure portal screenshot 
+provides a threat actor with the most actionable information — the piece 
+of intelligence that moves an attacker from passive observation to active 
+exploitation.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: D — A public IP address is visible and associated with the 
+virtual machine.**
+
+While all five options represent information leakage to varying degrees, 
+only the public IP address gives a threat actor a direct, immediately 
+actionable target. The other options provide contextual intelligence but 
+cannot alone enable an attack. A public IP is the difference between 
+knowing a target exists and being able to reach it.
 
 ### 🔍 Evidence
 
 | Field | Value |
 |------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+| Host | azwks-phtg-02 |
+| Public IP Address | 74.249.82.162 |
+| Correct Answer | D |
+| Source | Exhibit B — Azure Portal Screenshot (Networking Panel) |
+| Timestamp | N/A — Static open-source evidence |
+| Process | N/A — No process execution involved |
+| Parent Process | N/A — No process execution involved |
+| Command Line | N/A — No process execution involved |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The public IP address is the single most actionable piece of intelligence 
+visible in the Azure portal screenshot because it:
+
+- **Provides a directly routable target** — no additional reconnaissance required
+- **Enables immediate active exploitation** — the attacker can begin 
+  scanning, fingerprinting, and brute forcing without any further 
+  information gathering
+- **Confirms internet reachability** — a public IP on a running VM 
+  means the service is live and accessible from anywhere on the internet
+- **Combines lethally with Option A** — knowing the OS is Windows 10 
+  Enterprise and having a public IP immediately suggests RDP (port 3389) 
+  as the primary attack vector
+
+In isolation, each of the other options adds context. But without a 
+public IP, none of them can be acted upon. The IP is the bridge between 
+passive intelligence and active attack.
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+N/A — This question was answered through analysis of open-source evidence 
+(Exhibit B). No KQL query was required.
+
+The public IP identified here (`74.249.82.162`) is subsequently used as 
+a reference point when correlating inbound connection activity in MDE 
+telemetry:
+
+```kql
+// Subsequent query to confirm inbound activity against the exposed IP
+DeviceNetworkEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LocalPort == 3389
+| where RemoteIPType == "Public"
+| summarize ConnectionCount = count() by RemoteIP, ActionType
+| order by ConnectionCount desc
+```
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<img width="886" height="658" alt="image" src="https://github.com/user-attachments/assets/fc2db8cd-44a3-43e3-8855-60a3e0f7d78b" />
 
 ### 🛠️ Detection Recommendation
 
 **Hunting Tip:**  
-<Actionable guidance for defenders>
+- **Azure Defender for Cloud** will flag any VM with RDP exposed to 
+  the internet as a high-severity recommendation — ensure these alerts 
+  are actioned immediately and not suppressed
+- Implement **Azure Policy** to deny the creation of public IP 
+  associations on VMs without explicit approval through a change 
+  management process
+- Use **Azure Bastion** to provide secure RDP/SSH access without 
+  exposing public IPs on individual VMs
+- Conduct **quarterly attack surface reviews** — enumerate all 
+  resources with public IPs in your Azure tenant and validate each 
+  one has a documented business justification
+- Train employees to **never photograph or screenshot cloud management 
+  consoles** for social media posts — even with good intentions, 
+  the exposure risk is significant
 
 </details>
 
