@@ -115,7 +115,10 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1590 | Gather Victim Network Information | Reconnaissance | 🟠 High |
 | T1595 | Active Scanning | Reconnaissance | 🟠 High |
 | T1133 | External Remote Services | Initial Access | 🔴 Critical |
-| 5 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 5 | | T1593.001 | Search Open Websites/Domains: Social Media | Reconnaissance | 🔴 Critical |
+| T1589.002 | Gather Victim Identity Information: Email Addresses | Reconnaissance | 🟠 High |
+| T1591.004 | Gather Victim Org Information: Identify Roles | Reconnaissance | 🟠 High |
+| T1590.005 | Gather Victim Network Information: IP Addresses | Reconnaissance | 🔴 Critical |
 | 6 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 7 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 8 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -503,34 +506,93 @@ DeviceNetworkEvents
 <summary id="-flag-5">🚩 <strong>Flag 5: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify what activity was being performed on the workstation visible in 
+the LinkedIn post to understand the operational context of the exposure 
+and establish who was responsible for the leaked infrastructure details.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: C — Managing cloud infrastructure resources.**
+
+The workstation visible in Exhibit A (LinkedIn post by Sarah Chen) shows 
+two monitors displaying what is consistent with active cloud infrastructure 
+management. The left monitor shows an Azure portal session and the right 
+monitor displays what appears to be a terminal or code editor consistent 
+with infrastructure configuration or deployment work — directly aligned 
+with the hunt brief's context of the HealthCloud rollout on 11 December 2025.
+
 
 ### 🔍 Evidence
 
 | Field | Value |
 |------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+| Host | N/A — OSINT phase, no endpoint telemetry involved |
+| Person | Sarah Chen |
+| Job Title | Cloud Engineer at PHTG |
+| Monitor 1 | Azure portal session (cloud console) |
+| Monitor 2 | Terminal or code editor (infrastructure configuration) |
+| Context | First day on HealthCloud rollout — 11 December 2025 |
+| Correct Answer | C |
+| Source | Exhibit A — LinkedIn Post |
+| Timestamp | N/A — Static open-source evidence |
+| Process | N/A — No process execution involved |
+| Parent Process | N/A — No process execution involved |
+| Command Line | N/A — No process execution involved |
+
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The identification of the activity being performed is critical for two reasons:
+
+1. **It confirms the source of the leak.** Sarah Chen was actively managing 
+   cloud infrastructure — specifically the HealthCloud rollout — when the 
+   photo was taken. This means the Azure portal screenshot visible on her 
+   monitor was a live, active session showing real infrastructure details 
+   including the public IP of `azwks-phtg-02`.
+
+2. **It establishes the human element of the exposure.** This was not a 
+   technical misconfiguration or a data breach — it was an unintentional 
+   OPSEC failure by a cloud engineer celebrating a milestone on social media. 
+   The activity being performed (cloud infrastructure management) made the 
+   exposure particularly damaging because the screens displayed live, 
+   actionable infrastructure details rather than benign content.
+
+The photo compressed the attacker's reconnaissance phase from days of 
+active scanning to seconds of passive observation.
+
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+N/A — This finding was derived entirely from open-source evidence analysis 
+of Exhibit A (LinkedIn post). No KQL query was required.
+
+The identity of Sarah Chen and her role as a Cloud Engineer at PHTG is 
+carried forward as context for later phases of the investigation, 
+particularly when a file named `Sarah_Chen_Notes.exe` is discovered 
+on the compromised host — suggesting the threat actor used her identity 
+as a social engineering lure.
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<img width="872" height="1628" alt="image" src="https://github.com/user-attachments/assets/4ff6dd35-dbed-41f6-ad9c-22d3c8cfb74c" />
+
 
 ### 🛠️ Detection Recommendation
 
 **Hunting Tip:**  
-<Actionable guidance for defenders>
+- **Implement a social media policy** that explicitly prohibits employees 
+  from photographing or sharing screenshots of workstations, cloud consoles, 
+  or any infrastructure management tooling on personal or professional 
+  social media accounts
+- **Security awareness training** should include specific examples of 
+  unintentional OPSEC failures via social media — particularly for 
+  cloud engineering, DevOps, and IT operations teams who regularly 
+  work with sensitive infrastructure details
+- **Monitor for company mentions on social media** using OSINT tooling 
+  (e.g. Google Alerts, social media monitoring platforms) to identify 
+  unintentional disclosures before threat actors act on them
+- **Conduct periodic OSINT reviews** of employee LinkedIn profiles, 
+  particularly those in privileged technical roles, to assess what 
+  infrastructure intelligence is inadvertently being made public
+- Consider implementing **screen privacy filters** on workstations 
+  in open office environments where photographs could inadvertently 
+  capture sensitive screen content
 
 </details>
 
