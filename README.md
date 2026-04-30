@@ -103,7 +103,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1594 | Search Victim-Owned Websites | Reconnaissance | 🟡 Medium |
 | T1589 | Gather Victim Identity Information | Reconnaissance | 🟠 High |
 | T1591 | Gather Victim Org Information | Reconnaissance | 🟡 Medium | 
-| 2 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 2 | | T1580 | Cloud Infrastructure Discovery | Discovery | 🟠 High |
+| T1593 | Search Open Websites/Domains | Reconnaissance | 🟠 High |
+| T1590 | Gather Victim Network Information | Reconnaissance | 🟡 Medium |
+| T1591 | Gather Victim Org Information | Reconnaissance | 🟡 Medium |
+
 | 3 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 4 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 5 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -226,34 +230,78 @@ Key controls to implement:
 <summary id="-flag-2">🚩 <strong>Flag 2: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify the specific Azure virtual machine exposed in the LinkedIn post to 
+anchor all subsequent telemetry queries to a concrete, named asset. Without 
+a confirmed hostname, no endpoint telemetry can be scoped accurately.
 
 ### 📌 Finding
-<High-level description of the activity>
+The exposed virtual machine is **azwks-phtg-02**. The name was visible in the 
+Azure portal screenshot (Exhibit B) shared in the LinkedIn post, appearing both 
+as the page title and confirmed in the VM properties panel. The naming 
+convention reveals the asset type (workstation), the organisation (PHTG), and 
+the sequential instance number (02).
 
 ### 🔍 Evidence
 
 | Field | Value |
 |------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+| Host | azwks-phtg-02 |
+| VM Name (Page Title) | azwks-phtg-02 |
+| VM Name (Properties Panel) | azwks-phtg-02 |
+| Operating System | Windows 10 Enterprise |
+| Location | East US 2 (Zone 1) |
+| Time Created | 12/10/2025, 3:08 AM UTC |
+| Subscription | LOGIN\| Pacific - Cyber Range 1 |
+| Timestamp | N/A — Static open-source evidence |
+| Process | N/A — No process execution involved |
+| Parent Process | N/A — No process execution involved |
+| Command Line | N/A — No process execution involved |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The VM name `azwks-phtg-02` exposes several pieces of intelligence to an 
+external observer:
+
+- **`az`** — Confirms the asset is hosted on Microsoft Azure
+- **`wks`** — Identifies the asset as a workstation-class machine
+- **`phtg`** — Confirms the organisation abbreviation
+- **`02`** — Implies at least one other VM exists (`azwks-phtg-01`), 
+  inviting further enumeration
+
+A threat actor observing this naming pattern can immediately infer the 
+existence of additional assets and begin targeted reconnaissance against 
+the organisation's Azure footprint. The VM name also becomes the primary 
+anchor for all MDE telemetry queries — every KQL query in this 
+investigation will filter on `DeviceName == "azwks-phtg-02"`.
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+N/A — The VM name was extracted directly from Exhibit B (Azure portal 
+screenshot). No KQL query was required at this stage. However, the VM name 
+is used as the primary filter in all subsequent telemetry queries:
+
+```kql
+// Base filter used throughout all subsequent KQL queries
+DeviceNetworkEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+```
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<img width="886" height="658" alt="image" src="https://github.com/user-attachments/assets/adbd97a3-1bad-4c9d-8fbc-c68b84a6da28" />
 
 ### 🛠️ Detection Recommendation
 
 **Hunting Tip:**  
-<Actionable guidance for defenders>
+- **Adopt opaque VM naming conventions** that do not encode asset type, 
+  organisation name, or sequential identifiers. Use randomised or 
+  codename-based schemes instead (e.g. `vm-falcon-03` rather than 
+  `azwks-phtg-02`)
+- **Azure Defender for Cloud** can flag publicly exposed VMs with RDP 
+  open to the internet — ensure these alerts are actively monitored
+- **Enumerate your own attack surface** periodically using tools like 
+  Shodan or Azure's own network exposure reports to identify what is 
+  visible before an attacker does
+- Implement **Just-In-Time (JIT) VM access** in Azure Security Center 
+  to restrict RDP exposure to approved source IPs and time windows only
 
 </details>
 
