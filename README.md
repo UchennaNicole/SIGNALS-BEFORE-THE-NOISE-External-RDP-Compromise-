@@ -107,7 +107,6 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1593 | Search Open Websites/Domains | Reconnaissance | 🟠 High |
 | T1590 | Gather Victim Network Information | Reconnaissance | 🟡 Medium |
 | T1591 | Gather Victim Org Information | Reconnaissance | 🟡 Medium |
-
 | 3 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 4 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 5 | <Placeholder> | <Placeholder> | <Placeholder> |
