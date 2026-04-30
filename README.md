@@ -107,7 +107,10 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1593 | Search Open Websites/Domains | Reconnaissance | 🟠 High |
 | T1590 | Gather Victim Network Information | Reconnaissance | 🟡 Medium |
 | T1591 | Gather Victim Org Information | Reconnaissance | 🟡 Medium |
-| 3 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 3 | | T1590.005 | Gather Victim Network Information: IP Addresses | Reconnaissance | 🔴 Critical |
+| T1593 | Search Open Websites/Domains | Reconnaissance | 🟠 High |
+| T1590 | Gather Victim Network Information | Reconnaissance | 🟠 High |
+| T1595.001 | Active Scanning: Scanning IP Blocks | Reconnaissance | 🟡 Medium |
 | 4 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 5 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 6 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -310,34 +313,89 @@ DeviceNetworkEvents
 <summary id="-flag-3">🚩 <strong>Flag 3: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify the public IP address associated with the exposed Azure VM to 
+determine whether it is directly reachable from the open internet, and to 
+establish a target IP for cross-referencing against inbound network telemetry 
+in subsequent investigation phases.
 
 ### 📌 Finding
-<High-level description of the activity>
+The public IP address associated with `azwks-phtg-02` is **74.249.82.162**. 
+This was visible in two locations within the Azure portal screenshot (Exhibit B):
+- **Primary NIC public IP** field in the Essentials panel
+- **Networking → Public IP address** field in the Properties panel
+
+The IP was confirmed as active with the VM status showing **Running**, meaning 
+the address was live and reachable at the time the screenshot was taken.
 
 ### 🔍 Evidence
 
 | Field | Value |
 |------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+| Host | azwks-phtg-02 |
+| Public IP Address | 74.249.82.162 |
+| Private IP Address | 10.0.0.152 |
+| NIC Name | azwks-phtg-02694_z1 |
+| Virtual Network | Cyber-Range-VNet/Cyber-Range-Subnet |
+| VM Status | Running |
+| Timestamp | N/A — Static open-source evidence |
+| Process | N/A — No process execution involved |
+| Parent Process | N/A — No process execution involved |
+| Command Line | N/A — No process execution involved |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+A public IP address associated with a Windows 10 Enterprise VM is a 
+significant exposure. Combined with the information already extracted 
+from the LinkedIn post, a threat actor now has everything needed to 
+begin active targeting:
+
+- **The hostname** — `azwks-phtg-02`
+- **The OS** — Windows 10 Enterprise (implies RDP is likely enabled)
+- **The public IP** — `74.249.82.162` (a directly routable internet address)
+
+This compresses the attacker's pre-exploitation phase to near zero. 
+No scanning, no enumeration, no guesswork — the target handed them 
+the address. The public IP becomes the primary pivot point for 
+correlating inbound scanning, brute force, and authentication events 
+in MDE telemetry throughout this investigation.
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+N/A — The public IP address was extracted directly from Exhibit B 
+(Azure portal screenshot). No KQL query was required at this stage.
+
+However, this IP is referenced in subsequent telemetry queries to 
+correlate inbound connection activity:
+
+```kql
+// Used in subsequent phases to correlate inbound activity to the VM
+DeviceNetworkEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LocalPort == 3389
+| where RemoteIPType == "Public"
+| summarize count() by RemoteIP, ActionType
+| order by count_ desc
+```
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<img width="886" height="658" alt="image" src="https://github.com/user-attachments/assets/79b1b009-2f18-441e-a7e7-cad021017fb6" />
 
 ### 🛠️ Detection Recommendation
 
 **Hunting Tip:**  
-<Actionable guidance for defenders>
+- **Never expose RDP (port 3389) directly to the internet.** Use Azure 
+  Just-In-Time (JIT) VM Access to restrict inbound RDP to approved source 
+  IPs and defined time windows only
+- **Remove public IP associations** from VMs that do not require direct 
+  internet connectivity. Use Azure Bastion as a secure, browser-based 
+  RDP/SSH gateway that eliminates the need for public IPs on VMs entirely
+- **Azure Network Security Groups (NSGs)** should explicitly deny inbound 
+  RDP from `0.0.0.0/0`. Any rule permitting this should trigger an 
+  immediate alert
+- Enable **Microsoft Defender for Cloud** recommendations — it will 
+  actively flag internet-exposed RDP as a high-severity finding
+- Conduct periodic **attack surface reviews** using tools like Shodan 
+  or Azure's built-in network exposure assessments to identify 
+  publicly reachable services before threat actors do
 
 </details>
 
