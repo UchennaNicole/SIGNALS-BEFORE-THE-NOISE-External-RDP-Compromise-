@@ -123,7 +123,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1595 | Active Scanning | Reconnaissance | 🔴 Critical 
 | T1590.005 | Gather Victim Network Information: IP Addresses | Reconnaissance | 🟠 High 
 | T1133 | External Remote Services | Initial Access | 🔴 Critical |
-| 7 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 7 | | T1595.001 | Active Scanning: Scanning IP Blocks | Reconnaissance | 🔴 Critical |
+| T1110.001 | Brute Force: Password Guessing | Credential Access | 🔴 Critical |
+| T1110 | Brute Force | Credential Access | 🔴 Critical 
+| T1133 | External Remote Services | Initial Access | 🔴 Critical 
+| T1021.001 | Remote Services: Remote Desktop Protocol | Lateral Movement | 🔴 Critical 
 | 8 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 9 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 10 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -710,26 +714,90 @@ DeviceNetworkEvents
 <summary id="-flag-7">🚩 <strong>Flag 7: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify which local port on `azwks-phtg-02` was the primary target of 
+broad, automated scanning activity following the exposure of the VM's 
+public IP address in the LinkedIn post. This establishes the attack 
+vector used by threat actors to probe the internet-facing service.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: 3389**
+
+Port 3389 is the default port for **Remote Desktop Protocol (RDP)** — 
+the primary remote access service on Windows endpoints. This port is 
+one of the most heavily scanned ports on the internet, targeted by 
+automated botnets, credential stuffing tools, and opportunistic threat 
+actors globally. Given that the exposed VM runs **Windows 10 Enterprise** 
+and has a public IP, port 3389 was the immediate and obvious target.
+
+The hunt title — **"External RDP Compromise"** — confirms RDP as the 
+attack vector before any telemetry is reviewed.
 
 ### 🔍 Evidence
 
 | Field | Value |
 |------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+| Host | azwks-phtg-02 |
+| Target Port | 3389 |
+| Protocol | RDP (Remote Desktop Protocol) |
+| Total Events on Port 3389 | 325 |
+| ActionTypes Observed | ConnectionAttempt (124), InboundConnectionAccepted (201) |
+| Unique Source IPs | 225 |
+| Timestamp | 09 December 2025 – 23 December 2025 UTC |
+| Process | N/A — Network telemetry, no process execution involved |
+| Parent Process | N/A — Network telemetry, no process execution involved |
+| Command Line | N/A — Network telemetry, no process execution involved |
+
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+Port 3389 (RDP) is consistently among the most targeted ports on the 
+internet for several reasons:
+
+- **Default Windows remote access** — RDP is enabled by default on 
+  many Windows Server and Enterprise deployments, making it a 
+  predictable attack surface
+- **Credential-based access** — A successful RDP brute force provides 
+  an interactive desktop session, giving the attacker full operator-level 
+  access to the endpoint
+- **No payload required for initial access** — Unlike exploits that 
+  require vulnerability chains, RDP brute force only requires valid 
+  credentials — making it low-cost and high-reward for attackers
+- **Automated scanning at scale** — Tools like Shodan, Masscan, and 
+  purpose-built RDP scanners continuously probe the internet for 
+  exposed port 3389 services
+
+In this investigation, the exposure of the public IP via LinkedIn 
+combined with a Windows 10 Enterprise OS made port 3389 the 
+unambiguous primary target. The telemetry confirmed 325 events 
+from 225 unique source IPs — consistent with mass automated scanning.
+
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Query to confirm port 3389 as the primary scan target
+DeviceNetworkEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LocalPort == 3389
+| summarize count() by ActionType
+| order by count_ desc
+```
+**Results:**
+| ActionType | Count |
+|------------|-------|
+| InboundConnectionAccepted | 201 |
+| ConnectionAttempt | 124 |
+| **Total** | **325** |
+
+```kql
+// Secondary query to confirm breadth of scanning — unique source IPs
+DeviceNetworkEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LocalPort == 3389
+| summarize dcount(RemoteIP)
+```
+
+**Result: 225 unique source IPs**
 
 ### 🖼️ Screenshot
 <Insert screenshot>
@@ -737,7 +805,36 @@ DeviceNetworkEvents
 ### 🛠️ Detection Recommendation
 
 **Hunting Tip:**  
-<Actionable guidance for defenders>
+**Hunting Tip:**
+- **Never expose port 3389 directly to the internet.** This is a 
+  fundamental security control — any VM with port 3389 open to 
+  `0.0.0.0/0` should be treated as a critical finding requiring 
+  immediate remediation
+- **Use Azure Just-In-Time (JIT) VM Access** to restrict RDP to 
+  approved source IPs for defined time windows only, eliminating 
+  persistent public exposure
+- **Deploy Azure Bastion** as a managed RDP/SSH gateway that 
+  removes the need for public IPs and open RDP ports on VMs entirely
+- **Create a Sentinel alert** for high-volume inbound RDP scanning:
+
+```kql
+// Alert rule — RDP scanning detection
+DeviceNetworkEvents
+| where LocalPort == 3389
+| where RemoteIPType == "Public"
+| where TimeGenerated > ago(1h)
+| summarize 
+    TotalEvents = count(),
+    UniqueSourceIPs = dcount(RemoteIP)
+    by DeviceName, bin(TimeGenerated, 1h)
+| where UniqueSourceIPs > 10
+| project TimeGenerated, DeviceName, TotalEvents, UniqueSourceIPs
+```
+
+- **Monitor for port 3389 exposure** using Azure Security Center / 
+  Defender for Cloud — it will automatically flag any NSG rule 
+  permitting inbound RDP from the internet as a high-severity 
+  recommendation requiring immediate action
 
 </details>
 
