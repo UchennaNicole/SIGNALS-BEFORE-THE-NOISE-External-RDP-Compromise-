@@ -1314,7 +1314,8 @@ correlated across the full kill chain.
 
 
 ### 🔧 KQL Query Used
-``kql
+
+```kql
 // GeoIP enrichment of the 57 IPs with both ConnectionAttempt 
 // and InboundConnectionAccepted against port 3389
 let GeoTable =
@@ -1333,6 +1334,7 @@ DeviceNetworkEvents
 | evaluate ipv4_lookup(GeoTable, RemoteIP, network)
 | summarize dcount(country_name)
 ```
+
 > **Investigative Note:** Due to how MDE records ActionTypes, the 
 > `make_set()` + `has` approach may return 0 results in KQL. If this 
 > occurs, export the raw per-IP ActionType data, identify the 57 IPs 
