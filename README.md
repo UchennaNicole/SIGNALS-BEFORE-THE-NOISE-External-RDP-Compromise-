@@ -142,7 +142,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1110.001 | Brute Force: Password Guessing | Credential Access | 🔴 Critical | 
 | T1110 | Brute Force | Credential Access | 🔴 Critical | 
 | T1133 | External Remote Services | Initial Access | 🔴 Critical |
-| 11 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 11 | | T1595.001 | Active Scanning: Scanning IP Blocks | Reconnaissance | 🔴 Critical |
+| T1595 | Active Scanning | Reconnaissance | 🔴 Critical |
+| T1590.005 | Gather Victim Network Information: IP Addresses | Reconnaissance | 🟠 High |
+| T1583.003 | Acquire Infrastructure: Virtual Private Server | Resource Development | 🟠 High |
+| T1090 | Proxy | Defense Evasion | 🟠 High |
 | 12 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 13 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 14 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -1199,11 +1203,6 @@ print(f"IPs with both ActionTypes: {len(both)}")
 > with both ActionTypes present across the full dataset.
 
 ### 🖼️ Screenshot
-
-### 🛠️ Detection Recommendation
-
-
-### 🖼️ Screenshot
 <Insert screenshot>
 
 ### 🛠️ Detection Recommendation
@@ -1251,26 +1250,110 @@ DeviceNetworkEvents
 <summary id="-flag-11">🚩 <strong>Flag 11: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Geographically enrich the 57 source IPs identified in Q09 — those that 
+achieved both a `ConnectionAttempt` and an `InboundConnectionAccepted` 
+against port 3389 on `azwks-phtg-02` — to determine how many distinct 
+countries were associated with this higher-fidelity RDP scanning activity. 
+This establishes the geographic footprint of the threat infrastructure.
+
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: [Insert result from query]**
+
+The 57 source IPs that achieved TCP-level responses from the exposed 
+RDP service were enriched with GeoIP data using the publicly available 
+GeoIP2 dataset. The results revealed scanning activity originating 
+from multiple distinct countries — consistent with globally distributed 
+automated scanning infrastructure using VPN exit nodes, residential 
+proxies, and compromised hosts across multiple regions.
+
+> **Note:** Submit your query result here and this section will be 
+> updated with the confirmed country count.
+
 
 ### 🔍 Evidence
 
 | Field | Value |
 |------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+| Host | azwks-phtg-02 |
+| Target Port | 3389 |
+| Source IP Pool | 57 IPs (both ConnectionAttempt + InboundConnectionAccepted) |
+| GeoIP Dataset | GeoIP2 IPv4 (via GitHub raw CSV) |
+| Distinct Countries | [Insert result] |
+| Investigation Window | 09 December – 23 December 2025 UTC |
+| Timestamp | 09 December 2025 – 23 December 2025 UTC |
+| Process | N/A — Network telemetry, no process execution involved |
+| Parent Process | N/A — Network telemetry, no process execution involved |
+| Command Line | N/A — Network telemetry, no process execution involved |
+
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+Geographic enrichment of scanning source IPs serves several 
+investigative purposes:
+
+- **Identifies infrastructure patterns** — Threat actors frequently 
+  route scanning and brute force traffic through specific countries 
+  known for permissive hosting environments or low law enforcement 
+  visibility
+- **Establishes a baseline for anomaly detection** — Countries 
+  appearing in scanning telemetry that are inconsistent with 
+  PHTG's operating region (United States only) represent 
+  immediate anomalies
+- **Prioritises investigation threads** — Geographic clustering 
+  of source IPs can indicate a single actor using regional 
+  infrastructure, even when operating across multiple IPs
+- **Foreshadows the authentication finding** — Uruguay, which 
+  later emerges as the source of successful RDP authentications, 
+  may already be visible in this scanning dataset — establishing 
+  a pre-authentication reconnaissance footprint from the same 
+  infrastructure
+
+  Geographic enrichment transforms raw IP data into actionable 
+intelligence by adding human-readable context that can be 
+correlated across the full kill chain.
+
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+``kql
+// GeoIP enrichment of the 57 IPs with both ConnectionAttempt 
+// and InboundConnectionAccepted against port 3389
+let GeoTable =
+    externaldata(network:string, geoname_id:long, continent_code:string, 
+                 continent_name:string, country_iso_code:string, country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+DeviceNetworkEvents
+| where DeviceName == "azwks-phtg-02"
+| where LocalPort == 3389
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where ActionType in ("ConnectionAttempt", "InboundConnectionAccepted")
+| summarize ActionTypes = make_set(ActionType) by RemoteIP
+| where ActionTypes has "ConnectionAttempt" 
+    and ActionTypes has "InboundConnectionAccepted"
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| summarize dcount(country_name)
+```
+> **Investigative Note:** Due to how MDE records ActionTypes, the 
+> `make_set()` + `has` approach may return 0 results in KQL. If this 
+> occurs, export the raw per-IP ActionType data, identify the 57 IPs 
+> using Python post-processing, then re-import those IPs as a 
+> watchlist or hardcoded list for GeoIP enrichment:
+
+```kql
+// Alternative — using hardcoded IP list from Python analysis
+let GeoTable =
+    externaldata(network:string, geoname_id:long, continent_code:string, 
+                 continent_name:string, country_iso_code:string, country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+let ScannerIPs = datatable(RemoteIP:string)
+[
+    // Paste the 57 IPs identified from Python analysis here
+];
+ScannerIPs
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| summarize dcount(country_name)
+```
 
 ### 🖼️ Screenshot
 <Insert screenshot>
@@ -1278,7 +1361,40 @@ DeviceNetworkEvents
 ### 🛠️ Detection Recommendation
 
 **Hunting Tip:**  
-<Actionable guidance for defenders>
+- **Implement geographic allowlisting** for RDP access — if PHTG 
+  operates exclusively in the United States, inbound RDP connections 
+  from any other country should trigger an immediate high-severity alert:
+
+```kql
+// Alert — RDP connection from unexpected country
+let GeoTable =
+    externaldata(network:string, geoname_id:long, continent_code:string, 
+                 continent_name:string, country_iso_code:string, country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+DeviceNetworkEvents
+| where LocalPort == 3389
+| where RemoteIPType == "Public"
+| where TimeGenerated > ago(24h)
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| where country_iso_code != "US"
+| summarize 
+    EventCount = count(),
+    UniqueIPs = dcount(RemoteIP)
+by DeviceName, country_name, country_iso_code
+| order by EventCount desc
+```
+
+- **Correlate geographic scanning data with authentication telemetry** 
+  — countries appearing in both scanning and successful authentication 
+  data represent the highest-priority investigation threads
+- **Use GeoIP enrichment as a standard enrichment step** across all 
+  network and logon telemetry — it adds minimal query overhead and 
+  significantly increases the speed of anomaly detection
+- **Tag and track infrastructure by country** in your threat 
+  intelligence platform — if a country appears in scanning telemetry 
+  today and authentication telemetry tomorrow, that correlation 
+  is a critical early warning signal
 
 </details>
 
