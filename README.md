@@ -132,7 +132,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1595 | Active Scanning | Reconnaissance | 🔴 Critical | 
 | T1110 | Brute Force | Credential Access | 🔴 Critical | 
 | T1133 | External Remote Services | Initial Access | 🔴 Critical |
-| 9 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 9 | | T1595.001 | Active Scanning: Scanning IP Blocks | Reconnaissance | 🔴 Critical |
+| T1595 | Active Scanning | Reconnaissance | 🔴 Critical |
+| T1590.005 | Gather Victim Network Information: IP Addresses | Reconnaissance | 🟠 High |
+| T1110 | Brute Force | Credential Access | 🔴 Critical |
+| T1133 | External Remote Services | Initial Access | 🔴 Critical |
 | 10 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 11 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 12 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -976,34 +980,115 @@ DeviceNetworkEvents
 <summary id="-flag-9">🚩 <strong>Flag 9: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Determine the number of distinct public IP addresses that targeted 
+port 3389 on `azwks-phtg-02` during the investigation window to 
+assess the breadth of scanning activity and determine whether the 
+targeting was opportunistic (many IPs) or focused (few IPs).
+
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: 225**
+
+A total of **225 unique public source IP addresses** were observed 
+targeting port 3389 on `azwks-phtg-02` during the investigation 
+window. This volume is consistent with globally distributed automated 
+scanning infrastructure — botnets, VPN exit nodes, and purpose-built 
+RDP scanning tools that continuously probe internet-exposed services.
+
 
 ### 🔍 Evidence
 
 | Field | Value |
 |------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+| Host | azwks-phtg-02 |
+| Target Port | 3389 |
+| Unique Public Source IPs | 225 |
+| Investigation Window | 09 December – 23 December 2025 UTC |
+| Timestamp | 09 December 2025 – 23 December 2025 UTC |
+| Process | N/A — Network telemetry, no process execution involved |
+| Parent Process | N/A — Network telemetry, no process execution involved |
+| Command Line | N/A — Network telemetry, no process execution involved |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The number of unique source IPs targeting a service is a key indicator 
+of the nature of the attack:
+
+- **225 unique IPs** confirms this is **opportunistic, automated 
+  scanning** rather than a targeted, single-actor campaign
+- Distributed scanning across many IPs is a deliberate evasion 
+  technique — it prevents any single IP from generating enough 
+  volume to trigger simple threshold-based alerts
+- However, within the 225 IPs, a subset of **57 IPs** showed both 
+  `ConnectionAttempt` and `InboundConnectionAccepted` events — 
+  these represent higher-fidelity targets that progressed beyond 
+  initial probing
+- Further enrichment with GeoIP data revealed these 225 IPs 
+  originated from **17 distinct countries**, confirming the use 
+  of globally distributed scanning infrastructure
+
+The breadth of source IPs also highlights why IP-based blocking 
+alone is insufficient as a defensive control — blocklisting 225 
+IPs reactively provides little protection against the next wave 
+of scanning from fresh infrastructure.
+
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Count of unique public source IPs targeting port 3389
+// Note: RemoteIPType filter removed as some IPs were not 
+// correctly classified as Public by MDE
+DeviceNetworkEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LocalPort == 3389
+| summarize dcount(RemoteIP)
+```
+
+**Result: 225 unique source IPs**
+
+> **Note:** An initial query filtering on `RemoteIPType == "Public"` 
+> returned 173 unique IPs. The filter was removed after determining 
+> that MDE was not correctly classifying all external IPs as Public, 
+> resulting in the accurate count of 225.
 
 ### 🖼️ Screenshot
 <Insert screenshot>
 
 ### 🛠️ Detection Recommendation
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+**Hunting Tip:**
+- **Do not rely on IP-based blocklisting** as a primary defensive 
+  control against distributed scanning. With 225 unique source IPs, 
+  reactive blocklisting is operationally unscalable
+- **Focus detection on behaviour, not source IP** — the pattern of 
+  many unique IPs targeting the same port in a short window is the 
+  signal, not any individual IP
+- Use this detection query to identify distributed scanning patterns:
+
+```kql
+// Alert — distributed RDP scanning from many unique source IPs
+DeviceNetworkEvents
+| where LocalPort == 3389
+| where TimeGenerated > ago(24h)
+| summarize
+    TotalEvents = count(),
+    UniqueSourceIPs = dcount(RemoteIP),
+    Countries = make_set(RemoteIP)
+    by DeviceName, bin(TimeGenerated, 1h)
+| where UniqueSourceIPs > 20
+| project TimeGenerated, DeviceName, TotalEvents, UniqueSourceIPs
+```
+
+- **Implement Azure NSG rules** to restrict inbound RDP to known, 
+  approved source IP ranges only — this alone would have blocked 
+  all 225 scanning IPs from reaching the service
+- **Use threat intelligence feeds** to enrich source IPs in 
+  `DeviceNetworkEvents` — many of the 225 IPs are likely already 
+  known scanning infrastructure and would trigger immediate alerts 
+  if correlated against a threat intel watchlist
+- **Consider deploying a honeypot** on port 3389 to collect 
+  intelligence on scanning infrastructure without exposing a 
+  production endpoint
 
 </details>
 
