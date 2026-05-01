@@ -137,7 +137,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1590.005 | Gather Victim Network Information: IP Addresses | Reconnaissance | 🟠 High |
 | T1110 | Brute Force | Credential Access | 🔴 Critical |
 | T1133 | External Remote Services | Initial Access | 🔴 Critical |
-| 10 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 10 | | T1595.001 | Active Scanning: Scanning IP Blocks | Reconnaissance | 🔴 Critical | 
+| T1595 | Active Scanning | Reconnaissance | 🔴 Critical |
+| T1110.001 | Brute Force: Password Guessing | Credential Access | 🔴 Critical | 
+| T1110 | Brute Force | Credential Access | 🔴 Critical | 
+| T1133 | External Remote Services | Initial Access | 🔴 Critical |
 | 11 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 12 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 13 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -1098,34 +1102,146 @@ DeviceNetworkEvents
 <summary id="-flag-10">🚩 <strong>Flag 10: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify the subset of source IPs that progressed beyond raw probing 
+and achieved a full TCP response from the exposed RDP service on 
+`azwks-phtg-02`. This separates opportunistic scanners from more 
+persistent actors that established a meaningful connection with the 
+target service.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: 57**
+
+Of the 225 unique source IPs that targeted port 3389, **57 IPs** 
+showed both a `ConnectionAttempt` and an `InboundConnectionAccepted` 
+event — confirming they achieved a TCP-level response from the RDP 
+service. These represent a higher-fidelity class of scanner: actors 
+whose tools engaged fully with the service rather than simply probing 
+and moving on.
 
 ### 🔍 Evidence
 
 | Field | Value |
 |------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+| Host | azwks-phtg-02 |
+| Target Port | 3389 |
+| Total Unique Source IPs | 225 |
+| IPs with Both ActionTypes | 57 |
+| ActionTypes Required | ConnectionAttempt AND InboundConnectionAccepted |
+| Investigation Window | 09 December – 23 December 2025 UTC |
+| Timestamp | 09 December 2025 – 23 December 2025 UTC |
+| Process | N/A — Network telemetry, no process execution involved |
+| Parent Process | N/A — Network telemetry, no process execution involved |
+| Command Line | N/A — Network telemetry, no process execution involved |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The distinction between raw probes and IPs that received a TCP 
+response is operationally significant:
+
+- **Raw probes (ConnectionAttempt only)** — The scanner sent a SYN 
+  packet and either received no response or a RST. These are low-signal 
+  events consistent with mass internet scanning tools like Masscan
+- **TCP response achieved (both ActionTypes)** — The scanner sent a 
+  connection attempt AND the service responded with an accepted 
+  connection. This means the RDP service engaged with these 57 IPs 
+  at the protocol level — a meaningful interaction that could 
+  progress to credential submission
+- **57 IPs represent the higher-priority investigation subset** — 
+  these are the actors most likely to have proceeded to 
+  authentication attempts in `DeviceLogonEvents`
+  This tiered analysis approach — moving from total events → unique IPs 
+→ IPs with TCP responses → IPs with auth attempts — is a core threat 
+hunting methodology for RDP compromise investigations.
+
+> **Investigative Note:** An initial KQL query using 
+> `make_set(ActionType)` with a `has` filter returned 0 results 
+> because MDE does not record both ActionTypes for the same IP 
+> within `DeviceNetworkEvents`. The correct approach was to 
+> process the raw per-IP, per-ActionType data in Python to 
+> identify IPs appearing in both ActionType groups across 
+> the full dataset.
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Export per-IP, per-ActionType event counts for analysis
+DeviceNetworkEvents
+| where DeviceName == "azwks-phtg-02"
+| where LocalPort == 3389
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| summarize count() by RemoteIP, ActionType
+```
+
+**Post-export Python analysis to identify IPs with both ActionTypes:**
+
+```python
+import csv
+
+ip_actions = {}
+with open('query_data.csv', 'r', encoding='utf-8-sig') as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        ip = row['RemoteIP']
+        action = row['ActionType']
+        if ip not in ip_actions:
+            ip_actions[ip] = set()
+        ip_actions[ip].add(action)
+
+both = [ip for ip, actions in ip_actions.items()
+        if 'ConnectionAttempt' in actions 
+        and 'InboundConnectionAccepted' in actions]
+
+print(f"IPs with both ActionTypes: {len(both)}")
+# Result: 57
+```
+
+> **Note:** A pure KQL approach using `make_set()` and `has` returned 
+> 0 results due to how MDE records ActionTypes per connection event. 
+> The Python post-processing approach correctly identified 57 IPs 
+> with both ActionTypes present across the full dataset.
+
+### 🖼️ Screenshot
+
+### 🛠️ Detection Recommendation
+
 
 ### 🖼️ Screenshot
 <Insert screenshot>
 
 ### 🛠️ Detection Recommendation
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+**Hunting Tip:**
+- **Tier your RDP scanning alerts by connection depth** — treat IPs 
+  that achieve TCP responses as higher severity than raw probes:
+
+```kql
+// Tier 1 — Raw probes only (lower priority)
+DeviceNetworkEvents
+| where LocalPort == 3389
+| where ActionType == "ConnectionAttempt"
+| where TimeGenerated > ago(24h)
+| summarize ProbeCount = count() by RemoteIP, DeviceName
+
+// Tier 2 — TCP response achieved (higher priority)
+DeviceNetworkEvents
+| where LocalPort == 3389
+| where ActionType == "InboundConnectionAccepted"
+| where RemoteIPType == "Public"
+| where TimeGenerated > ago(24h)
+| summarize AcceptedCount = count() by RemoteIP, DeviceName
+| where AcceptedCount > 3
+```
+
+- **Correlate TCP-response IPs directly with `DeviceLogonEvents`** 
+  — any IP that achieved an accepted connection on port 3389 AND 
+  appears in logon telemetry should be treated as a critical finding 
+  requiring immediate investigation
+- **Enrich the 57 IPs with threat intelligence** — cross-reference 
+  against known scanning infrastructure, VPN exit node lists, and 
+  Tor exit node lists to assess actor sophistication
+- **Use GeoIP enrichment** on this subset to identify unexpected 
+  geographic origins — in this investigation, GeoIP analysis of 
+  the broader scanning pool revealed activity from 17 countries, 
+  with Uruguay emerging as the key anomaly in subsequent 
+  authentication telemetry
 
 </details>
 
