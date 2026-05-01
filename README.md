@@ -128,7 +128,10 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1110 | Brute Force | Credential Access | 🔴 Critical 
 | T1133 | External Remote Services | Initial Access | 🔴 Critical 
 | T1021.001 | Remote Services: Remote Desktop Protocol | Lateral Movement | 🔴 Critical 
-| 8 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 8 | | T1595.001 | Active Scanning: Scanning IP Blocks | Reconnaissance | 🔴 Critical |
+| T1595 | Active Scanning | Reconnaissance | 🔴 Critical | 
+| T1110 | Brute Force | Credential Access | 🔴 Critical | 
+| T1133 | External Remote Services | Initial Access | 🔴 Critical |
 | 9 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 10 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 11 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -805,7 +808,6 @@ DeviceNetworkEvents
 ### 🛠️ Detection Recommendation
 
 **Hunting Tip:**  
-**Hunting Tip:**
 - **Never expose port 3389 directly to the internet.** This is a 
   fundamental security control — any VM with port 3389 open to 
   `0.0.0.0/0` should be treated as a critical finding requiring 
@@ -844,34 +846,127 @@ DeviceNetworkEvents
 <summary id="-flag-8">🚩 <strong>Flag 8: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Quantify the total volume of network events targeting port 3389 on 
+`azwks-phtg-02` during the investigation window to establish the scale 
+of scanning and connection activity against the exposed RDP service.
+
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: 325**
+
+A total of **325 network events** were recorded targeting port 3389 on 
+`azwks-phtg-02` between 9 December and 23 December 2025. This breaks 
+down into two action types:
+
+| ActionType | Count |
+|------------|-------|
+| InboundConnectionAccepted | 201 |
+| ConnectionAttempt | 124 |
+| **Total** | **325** |
+
+This volume is consistent with broad, automated scanning activity 
+targeting an internet-exposed RDP service. The combination of raw 
+connection attempts and accepted connections confirms the port was 
+both reachable and actively responding to inbound requests.
+
 
 ### 🔍 Evidence
-
 | Field | Value |
 |------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+| Host | azwks-phtg-02 |
+| Target Port | 3389 |
+| Total Network Events | 325 |
+| InboundConnectionAccepted | 201 |
+| ConnectionAttempt | 124 |
+| Investigation Window | 09 December – 23 December 2025 UTC |
+| Timestamp | 09 December 2025 – 23 December 2025 UTC |
+| Process | N/A — Network telemetry, no process execution involved |
+| Parent Process | N/A — Network telemetry, no process execution involved |
+| Command Line | N/A — Network telemetry, no process execution involved |
+
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The volume of 325 events across the investigation window tells us several 
+important things:
+
+- **The VM was actively discovered and targeted** — this is not 
+  background internet noise. The timing correlates with the LinkedIn 
+  post exposing the public IP
+- **The split between attempts and accepted connections is significant** 
+  — 201 accepted connections means the RDP service was responding and 
+  engaging with inbound requests, not silently dropping them
+- **124 raw connection attempts** that did not result in an accepted 
+  connection suggest some scanning tools probed and moved on, while 
+  others persisted and achieved a TCP handshake
+- The total event count establishes a **baseline of hostile activity** 
+  that can be correlated with authentication events in `DeviceLogonEvents` 
+  to identify which connections progressed to credential submission
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Total network events targeting port 3389
+DeviceNetworkEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LocalPort == 3389
+| summarize count() by ActionType
+| order by count_ desc
+```
+
+**Results:**
+| ActionType | Count |
+|------------|-------|
+| InboundConnectionAccepted | 201 |
+| ConnectionAttempt | 124 |
+| **Total** | **325** |
+
+```kql
+// Single count of all events
+DeviceNetworkEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LocalPort == 3389
+| summarize count()
+```
+
+**Result: 325**
+
 
 ### 🖼️ Screenshot
 <Insert screenshot>
 
 ### 🛠️ Detection Recommendation
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+**Hunting Tip:**
+- **Establish a network event baseline** for all internet-facing VMs. 
+  Any port receiving more than a defined threshold of inbound events 
+  from unique public IPs within a 24-hour window should trigger an 
+  immediate alert
+- **Correlate `DeviceNetworkEvents` with `DeviceLogonEvents`** — 
+  network events that progress to authentication attempts represent 
+  a higher-fidelity signal than scanning alone
+- Use this detection query to alert on sustained RDP targeting:
+
+```kql
+// Alert — sustained RDP targeting
+DeviceNetworkEvents
+| where DeviceName == "azwks-phtg-02"
+| where LocalPort == 3389
+| where RemoteIPType == "Public"
+| where TimeGenerated > ago(24h)
+| summarize 
+    TotalEvents = count(),
+    UniqueSourceIPs = dcount(RemoteIP),
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated)
+    by DeviceName
+| where TotalEvents > 50
+```
+
+- **Review accepted connections specifically** — `InboundConnectionAccepted` 
+  events on port 3389 from public IPs are higher severity than raw 
+  `ConnectionAttempt` events and should be prioritised for follow-up 
+  in `DeviceLogonEvents`
 
 </details>
 
