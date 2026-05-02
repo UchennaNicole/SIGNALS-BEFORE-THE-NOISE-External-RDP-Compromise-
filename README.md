@@ -192,7 +192,12 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1021.001 | Remote Services: Remote Desktop Protocol | Lateral Movement | 🔴 Critical |
 | T1583.003 | Acquire Infrastructure: Virtual Private Server | Resource Development | 🟠 High |
 | T1090 | Proxy | Defense Evasion | 🟠 High |
-| 20 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 20 | | T1078.003 | Valid Accounts: Local Accounts | Initial Access | 🔴 Critical |
+| T1078 | Valid Accounts | Defense Evasion / Initial Access | 🔴 Critical |
+| T1110.001 | Brute Force: Password Guessing | Credential Access | 🔴 Critical |
+| T1021.001 | Remote Services: Remote Desktop Protocol | Lateral Movement | 🔴 Critical |
+| T1133 | External Remote Services | Initial Access | 🔴 Critical |
+| T1098 | Account Manipulation | Persistence | 🟠 High |
 | 21 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 22 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 23 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -2707,34 +2712,162 @@ DeviceLogonEvents
 <summary id="-flag-20">🚩 <strong>Flag 20: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify the specific account used by the threat actor during 
+successful RDP authentication sessions originating from Uruguay 
+to confirm which credential was compromised, assess the level 
+of access obtained, and anchor all subsequent process and 
+file activity investigation to the correct account context.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `vmadminusername`**
+
+All 23 successful RDP authentication events originating from 
+Uruguay used the account **`vmadminusername`** — a generic, 
+predictable local administrator account name that was almost 
+certainly created during VM provisioning and never renamed 
+or hardened. This account's predictable name made it an 
+immediate high-priority target for automated credential 
+stuffing tools.
+
+| Account | Country | Successful Auth Events | Account Type |
+|---------|---------|----------------------|--------------|
+| vmadminusername | Uruguay | 23 | Local Administrator |
 
 ### 🔍 Evidence
-
 | Field | Value |
 |------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+| Host | azwks-phtg-02 |
+| Compromised Account | vmadminusername |
+| Account Type | Local Administrator |
+| Source Country | Uruguay |
+| Source IPs | 173.244.55.128, 173.244.55.131 |
+| Successful Auth Events | 23 |
+| First Successful Auth | 12/12/2025 05:47:45 UTC |
+| LogonTypes | RemoteInteractive, Network |
+| Investigation Window | 09 December – 23 December 2025 UTC |
+| Timestamp | 12 December 2025 – 23 December 2025 UTC |
+| Process | N/A — Authentication telemetry, no process execution |
+| Parent Process | N/A — Authentication telemetry, no process execution |
+| Command Line | N/A — Authentication telemetry, no process execution |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The identification of `vmadminusername` as the compromised 
+account is critical for several reasons:
+
+- **Predictable naming convention** — `vmadminusername` 
+  is an immediately recognisable default VM administrator 
+  account name. Automated credential stuffing tools 
+  maintain lists of common admin account names and 
+  target them first. This account name would appear 
+  near the top of any such list
+- **Local administrator privileges** — A local admin 
+  account provides the threat actor with elevated 
+  privileges on the endpoint from the moment of first 
+  login — no privilege escalation required. The attacker 
+  had immediate administrative control of `azwks-phtg-02` 
+  from their first successful session
+- **No MFA protection** — The account was accessible 
+  with credentials alone. Multi-factor authentication 
+  would have prevented all 23 successful authentications 
+  even after the password was brute forced
+- **Account name as a lure** — The file 
+  `Sarah_Chen_Notes.exe` discovered later in the 
+  investigation was delivered and executed under 
+  this account's context, confirming `vmadminusername` 
+  as the account used throughout the entire post-exploitation 
+  phase
+- **All subsequent telemetry is anchored here** — Every 
+  process execution, file creation, and network event 
+  initiated by the threat actor on `azwks-phtg-02` 
+  will be associated with `vmadminusername` in 
+  `InitiatingProcessAccountName` fields across 
+  `DeviceProcessEvents` and `DeviceFileEvents`
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Identify account used in successful RDP auth from Uruguay
+let GeoTable =
+    externaldata(network:string, geoname_id:long, continent_code:string, 
+                 continent_name:string, country_iso_code:string, country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| where ActionType == "LogonSuccess"
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| where country_name == "Uruguay"
+| summarize count() by AccountName
+```
+
+**Result:**
+| AccountName | count_ |
+|-------------|--------|
+| vmadminusername | 23 |
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+vmadminusername as the sole account associated with all 23 
+successful RDP authentication events from Uruguay>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Immediately disable or rename `vmadminusername`** — 
+  this account should be considered fully compromised 
+  and must not be used for any legitimate administrative 
+  purpose going forward
+- **Audit all local administrator accounts** across the 
+  PHTG estate for predictable naming conventions. Any 
+  account named with obvious patterns (`admin`, 
+  `administrator`, `vmadmin`, `localadmin`) should 
+  be renamed immediately:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Hunt for other devices with the same compromised account
+DeviceLogonEvents
+| where AccountName == "vmadminusername"
+| where ActionType == "LogonSuccess"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| summarize 
+    SuccessCount = count(),
+    UniqueSourceIPs = dcount(RemoteIP),
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated)
+    by DeviceName, AccountName
+| order by SuccessCount desc
+```
+
+- **Enable Microsoft Defender for Identity** to detect 
+  suspicious account behaviour including unusual 
+  authentication patterns, geographic anomalies, 
+  and lateral movement attempts using compromised 
+  local accounts
+- **Implement a privileged account naming policy** 
+  that uses non-obvious, randomised account names 
+  for all administrative accounts — making them 
+  significantly harder to target with credential 
+  stuffing tools
+- **Enforce MFA for all local administrator accounts** 
+  that have RDP access — valid credentials alone 
+  should never be sufficient for administrative 
+  access to internet-facing endpoints
+- **Create a honeypot account** named `vmadminusername` 
+  across the wider PHTG estate — any logon attempt 
+  against this account on any other device should 
+  trigger an immediate P1 alert, as it indicates 
+  the threat actor is attempting lateral movement 
+  using the compromised credential:
+
+```kql
+// Honeypot detection — vmadminusername logon on any device
+DeviceLogonEvents
+| where AccountName == "vmadminusername"
+| where TimeGenerated > ago(1h)
+| project TimeGenerated, DeviceName, AccountName,
+          RemoteIP, ActionType, LogonType
+```
 
 </details>
 
