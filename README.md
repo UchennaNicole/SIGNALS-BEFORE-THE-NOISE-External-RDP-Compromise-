@@ -169,7 +169,12 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1110 | Brute Force | Credential Access | 🔴 Critical |
 | T1078.003 | Valid Accounts: Local Accounts | Initial Access | 🔴 Critical |
 | T1133 | External Remote Services | Initial Access | 🔴 Critical |
-| 16 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 16 | | T1110.001 | Brute Force: Password Guessing | Credential Access | 🔴 Critical |
+| T1110 | Brute Force | Credential Access | 🔴 Critical | 
+| T1090 | Proxy | Defense Evasion | 🟠 High |
+| T1090.003 | Proxy: Multi-hop Proxy | Defense Evasion | 🟠 High |
+| T1583.003 | Acquire Infrastructure: Virtual Private Server | Resource Development | 🟠 High |
+| T1078 | Valid Accounts | Initial Access | 🔴 Critical |
 | 17 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 18 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 19 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -2061,34 +2066,147 @@ DeviceLogonEvents
 <summary id="-flag-16">🚩 <strong>Flag 16: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Geographically enrich all RDP-related authentication events against 
+`azwks-phtg-02` to determine how many distinct countries were 
+associated with external logon activity. This establishes the full 
+geographic footprint of the credential-based attack campaign and 
+identifies anomalous geographic origins inconsistent with PHTG's 
+expected operating region.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: 17**
+
+RDP-related authentication events originated from **17 distinct 
+countries** after GeoIP enrichment of all external source IPs. 
+This confirms the use of globally distributed attack infrastructure 
+— consistent with a threat actor routing credential stuffing and 
+brute force traffic through VPN exit nodes, residential proxies, 
+and compromised hosts across multiple geographic regions to evade 
+detection.
 
 ### 🔍 Evidence
-
 | Field | Value |
 |------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+| Host | azwks-phtg-02 |
+| Total RDP Auth Events | 675 |
+| Unique Source IPs Enriched | All public IPs from DeviceLogonEvents |
+| Distinct Countries | 17 |
+| GeoIP Dataset | GeoIP2 IPv4 (via GitHub raw CSV) |
+| PHTG Operating Region | United States only |
+| Investigation Window | 09 December – 23 December 2025 UTC |
+| Timestamp | 09 December 2025 – 23 December 2025 UTC |
+| Process | N/A — Authentication telemetry, no process execution |
+| Parent Process | N/A — Authentication telemetry, no process execution |
+| Command Line | N/A — Authentication telemetry, no process execution |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The presence of 17 distinct countries in RDP authentication 
+telemetry is a critical finding for several reasons:
+
+- **PHTG operates exclusively in the United States** — any 
+  authentication activity originating from outside the US 
+  is immediately anomalous and warrants investigation
+- **16 of 17 countries represent unauthorised geographic 
+  origins** — only the United States falls within PHTG's 
+  expected operating region. All other countries represent 
+  potentially hostile or unauthorised access attempts
+- **Geographic distribution confirms distributed attack 
+  infrastructure** — threat actors deliberately route 
+  traffic through multiple countries to evade geographic 
+  IP blocklisting and distribute attack volume below 
+  per-IP alert thresholds
+- **Uruguay emerges as the critical anomaly** — subsequent 
+  analysis reveals Uruguay as the source of all successful 
+  RDP authentications, making it the highest-priority 
+  geographic finding in this investigation
+- **17 countries across authentication telemetry vs the 
+  scanning phase** — comparing the geographic footprint 
+  of scanning activity with authentication activity helps 
+  identify which infrastructure was used exclusively for 
+  reconnaissance and which progressed to credential 
+  submission
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// GeoIP enrichment of RDP-related authentication events
+let GeoTable =
+    externaldata(network:string, geoname_id:long, continent_code:string, 
+                 continent_name:string, country_iso_code:string, country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| summarize dcount(country_name)
+```
+
+**Result: 17 distinct countries**
+
+```kql
+// Full country breakdown with event counts
+let GeoTable =
+    externaldata(network:string, geoname_id:long, continent_code:string, 
+                 continent_name:string, country_iso_code:string, country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| summarize EventCount = count() by country_name
+| order by EventCount desc
+```
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+the dcount of 17 distinct countries associated with RDP-related 
+authentication events, alongside the full country breakdown>
+
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Implement geographic allowlisting for RDP authentication** — 
+  since PHTG operates exclusively in the United States, any 
+  RDP authentication attempt from outside the US should 
+  trigger an immediate high-severity alert:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Alert — RDP authentication from non-US country
+let GeoTable =
+    externaldata(network:string, geoname_id:long, continent_code:string, 
+                 continent_name:string, country_iso_code:string, country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+DeviceLogonEvents
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| where TimeGenerated > ago(1h)
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| where country_iso_code != "US"
+| summarize 
+    EventCount = count(),
+    Failures = countif(ActionType == "LogonFailed"),
+    Successes = countif(ActionType == "LogonSuccess")
+    by DeviceName, country_name, country_iso_code
+| order by Successes desc, EventCount desc
+```
+
+- **Prioritise non-US `LogonSuccess` events for immediate 
+  investigation** — a successful RDP authentication from 
+  outside PHTG's operating region should be treated as a 
+  confirmed incident until proven otherwise
+- **Build a geographic baseline** for all internet-facing 
+  assets — document expected source countries for each 
+  service and alert on any deviation from the baseline
+- **Correlate geographic authentication data with HR records** 
+  — if no PHTG employees are located in a given country, 
+  any successful authentication from that country is 
+  definitively anomalous and warrants immediate response
 
 </details>
 
