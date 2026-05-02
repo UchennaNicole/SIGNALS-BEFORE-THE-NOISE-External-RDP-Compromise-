@@ -164,7 +164,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1110 | Brute Force | Credential Access | 🔴 Critical |
 | T1078 | Valid Accounts | Defense Evasion / Initial Access | 🔴 Critical |
 | T1133 | External Remote Services | Initial Access | 🔴 Critical |
-| 15 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 15 | | T1110.001 | Brute Force: Password Guessing | Credential Access | 🔴 Critical |
+| T1110.003 | Brute Force: Password Spraying | Credential Access | 🔴 Critical |
+| T1110 | Brute Force | Credential Access | 🔴 Critical |
+| T1078.003 | Valid Accounts: Local Accounts | Initial Access | 🔴 Critical |
+| T1133 | External Remote Services | Initial Access | 🔴 Critical |
 | 16 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 17 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 18 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -1908,34 +1912,146 @@ DeviceLogonEvents
 <summary id="-flag-15">🚩 <strong>Flag 15: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify the most common failure reason recorded in `DeviceLogonEvents` 
+for RDP-related authentication attempts against `azwks-phtg-02`. This 
+characterises the nature of the credential-based attack and confirms 
+whether the failures were due to invalid credentials, account lockouts, 
+policy restrictions, or other causes.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `InvalidUserNameOrPassword`**
+
+`InvalidUserNameOrPassword` was the most common failure reason, 
+accounting for **637 of the 646 total RDP-related logon failures** — 
+representing **98.6%** of all failed authentication attempts. The 
+remaining 9 failures were attributed to `UnauthorizedLogonType`.
+
+| FailureReason | Count | Percentage |
+|---------------|-------|------------|
+| InvalidUserNameOrPassword | 637 | 98.6% |
+| UnauthorizedLogonType | 9 | 1.4% |
+| **Total** | **646** | **100%** |
 
 ### 🔍 Evidence
-
 | Field | Value |
 |------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+| Host | azwks-phtg-02 |
+| Most Common FailureReason | InvalidUserNameOrPassword |
+| InvalidUserNameOrPassword Count | 637 |
+| UnauthorizedLogonType Count | 9 |
+| Total LogonFailed Events | 646 |
+| Investigation Window | 09 December – 23 December 2025 UTC |
+| Timestamp | 09 December 2025 – 23 December 2025 UTC |
+| Process | N/A — Authentication telemetry, no process execution |
+| Parent Process | N/A — Authentication telemetry, no process execution |
+| Command Line | N/A — Authentication telemetry, no process execution |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The dominance of `InvalidUserNameOrPassword` as the failure reason 
+is highly significant for the investigation:
+
+- **Confirms credential stuffing or brute force** — 637 failures 
+  due to invalid credentials is the definitive signature of an 
+  automated tool cycling through username and password combinations. 
+  The attacker did not know the credentials in advance — they 
+  were guessing
+- **No account lockout failures observed** — The absence of 
+  account lockout failure reasons confirms that either no lockout 
+  policy was configured on `azwks-phtg-02`, or the attacker was 
+  sufficiently distributed across IPs to avoid triggering it. 
+  This represents a critical defensive gap
+- **`UnauthorizedLogonType` (9 events)** — These failures indicate 
+  the attacker attempted logon methods not permitted by policy 
+  on this endpoint. This is a minor signal suggesting some 
+  automated tools in the campaign attempted non-RDP authentication 
+  methods that were blocked by local policy
+- **The 637 failures ultimately yielded 29 successes** — The 
+  `InvalidUserNameOrPassword` failures represent the attacker's 
+  unsuccessful guesses before eventually finding the correct 
+  credentials for `vmadminusername`. The weak, predictable 
+  account name made it a high-priority target for credential 
+  stuffing tools
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Most common failure reason for RDP-related authentication failures
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| where ActionType == "LogonFailed"
+| summarize count() by FailureReason
+| order by count_ desc
+```
+
+**Results:**
+| FailureReason | Count |
+|---------------|-------|
+| InvalidUserNameOrPassword | 637 |
+| UnauthorizedLogonType | 9 |
+| **Total** | **646** |
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+InvalidUserNameOrPassword as the dominant failure reason with 
+637 events, followed by UnauthorizedLogonType with 9 events>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Alert on sustained `InvalidUserNameOrPassword` failures** 
+  from external IPs — this is the clearest signal of an active 
+  brute force campaign:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Alert — sustained invalid credential failures
+DeviceLogonEvents
+| where ActionType == "LogonFailed"
+| where FailureReason == "InvalidUserNameOrPassword"
+| where RemoteIPType == "Public"
+| where TimeGenerated > ago(1h)
+| summarize 
+    FailureCount = count(),
+    UniqueSourceIPs = dcount(RemoteIP),
+    UniqueAccounts = dcount(AccountName),
+    FirstAttempt = min(TimeGenerated),
+    LastAttempt = max(TimeGenerated)
+    by DeviceName
+| where FailureCount > 10
+```
+
+- **Enforce strong password policies** — passwords for 
+  internet-facing accounts must be long, complex, and 
+  not based on predictable patterns like the account name
+- **Implement account lockout** — configure a lockout 
+  threshold of 5-10 invalid attempts with a 30-minute 
+  lockout duration to interrupt automated credential 
+  stuffing campaigns
+- **Rename or disable default admin accounts** — 
+  `vmadminusername` is an immediately recognisable 
+  default account name that would appear near the top 
+  of any credential stuffing list. Rename it to a 
+  non-obvious value and create a honeypot account 
+  called `vmadminusername` that triggers an immediate 
+  alert on any logon attempt:
+
+```kql
+// Honeypot account alert — any logon attempt is suspicious
+DeviceLogonEvents
+| where AccountName == "vmadminusername"
+| where TimeGenerated > ago(1h)
+| project TimeGenerated, DeviceName, AccountName, 
+          RemoteIP, ActionType, LogonType
+```
+
+- **Deploy Microsoft Entra ID Password Protection** 
+  with a custom banned password list that includes 
+  common admin account names, company names, and 
+  product names to prevent weak credential configurations
+- **Require MFA for all RDP access** — even with 
+  valid credentials, MFA would have prevented the 
+  29 successful authentications that led to confirmed 
+  compromise
 
 </details>
 
