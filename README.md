@@ -270,7 +270,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1036.005 | Masquerading: Match Legitimate Name or Location | Defense Evasion | 🔴 Critical |
 | T1543.003 | Create or Modify System Process: Windows Service | Persistence | 🟠 High |
 | T1105 | Ingress Tool Transfer | Command and Control | 🔴 Critical |
-| 35 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 35 | | T1095 | Non-Application Layer Protocol | Command and Control | 🔴 Critical |
+| T1071 | Application Layer Protocol | Command and Control | 🔴 Critical |
+| T1043 | Commonly Used Port | Command and Control | 🟠 High |
+| T1583.003 | Acquire Infrastructure: Virtual Private Server | Resource Development | 🟠 High |
+| T1008 | Fallback Channels | Command and Control | 🟠 High |
 | 36 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 37 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 38 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -5535,35 +5539,208 @@ DeviceProcessEvents
 <summary id="-flag-35">🚩 <strong>Flag 35: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify the external IP address that the Meterpreter payload 
+attempted to communicate with following execution on 
+`azwks-phtg-02` — confirming the Command and Control (C2) 
+infrastructure used by the threat actor and completing the 
+infrastructure attribution picture established throughout 
+this investigation.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `173.244.55.130`**
+
+Following execution, the Meterpreter payload attempted to 
+establish a C2 connection to **`173.244.55.130`** on port 
+**4444** — the default Metasploit listener port. All three 
+callback attempts failed (`ConnectionFailed`), suggesting 
+the C2 listener was not active at the time of execution. 
+This IP belongs to the same `173.244.55.0/24` subnet as 
+the two RDP access IPs, completing the threat actor 
+infrastructure picture.
+
+**Complete `173.244.55.0/24` Infrastructure Map:**
+
+| IP Address | Role | Evidence Source |
+|------------|------|-----------------|
+| 173.244.55.128 | RDP Access (secondary) | DeviceLogonEvents |
+| 173.244.55.130 | Meterpreter C2 | DeviceNetworkEvents |
+| 173.244.55.131 | RDP Access (primary) | DeviceLogonEvents |
 
 ### 🔍 Evidence
-
 | Field | Value |
-|------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+|-------|-------|
+| Host | azwks-phtg-02 |
+| C2 IP | 173.244.55.130 |
+| C2 Port | 4444 |
+| Protocol | TCP |
+| ActionType | ConnectionFailed |
+| Callback Attempts | 3 |
+| Initiating Process (Phase 1) | sarah_chen_notes.exe |
+| Initiating Process (Phase 2) | phtg.exe |
+| C2 Subnet | 173.244.55.0/24 |
+| Country | Uruguay |
+| SHA256 | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 |
+| Timestamp | 12/12/2025 14:19:12, 12/13/2025 10:13:39, 10:22:09 UTC |
+| Process | sarah_chen_notes.exe / phtg.exe |
+| Parent Process | explorer.exe / cmd.exe |
+| Command Line | N/A — Network callback event |
+
+**C2 Callback Timeline:**
+| Timestamp | RemoteIP | Port | Process | ActionType |
+|-----------|----------|------|---------|------------|
+| 12/12/2025 14:19:12 | 173.244.55.130 | 4444 | sarah_chen_notes.exe | ConnectionFailed |
+| 12/13/2025 10:13:39 | 173.244.55.130 | 4444 | sarah_chen_notes.exe | ConnectionFailed |
+| 12/13/2025 10:22:09 | 173.244.55.130 | 4444 | phtg.exe | ConnectionFailed |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The C2 IP `173.244.55.130` is the most significant 
+network-level indicator of compromise in this investigation:
+
+- **Subnet convergence confirms single threat actor** — 
+  `173.244.55.130` shares a /24 subnet with the two 
+  RDP access IPs (`173.244.55.128` and `173.244.55.131`). 
+  Three adjacent IPs in the same subnet performing 
+  three distinct attack functions — initial access, 
+  persistent access, and C2 — is definitive evidence 
+  of a single, organised threat actor operating from 
+  dedicated Uruguayan infrastructure
+- **Port 4444 confirms out-of-the-box Metasploit** — 
+  Port 4444 is the default Metasploit/Meterpreter 
+  listener port. The use of the default port 
+  without customisation suggests the threat actor 
+  did not invest significant effort in operational 
+  security for their C2 configuration — a lower 
+  sophistication indicator
+- **All callbacks failed — C2 was not established** — 
+  Three `ConnectionFailed` events across both 
+  execution phases confirm the Meterpreter payload 
+  never successfully called home. The C2 listener 
+  was not active at the time of execution, 
+  meaning the threat actor did not achieve 
+  a live Meterpreter session despite successfully 
+  executing the payload
+- **Failed C2 does not mean the threat is resolved** — 
+  The absence of a successful C2 session does not 
+  eliminate the threat. The threat actor retained 
+  RDP access via `vmadminusername`, had `Launch.bat` 
+  as a persistence mechanism, and could re-activate 
+  the C2 listener at any time to achieve a 
+  Meterpreter session
+- **This IP should anchor all threat intelligence 
+  reporting** — `173.244.55.130` is the definitive 
+  C2 indicator for this intrusion and should be 
+  blocklisted, reported, and used to hunt for 
+  related infrastructure across the PHTG estate
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Identify C2 callback IP using payload SHA256
+// as the immutable process identifier
+DeviceNetworkEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-12T14:00:00Z) .. datetime(2025-12-23))
+| where InitiatingProcessSHA256 == 
+    "224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695"
+| where RemoteIPType == "Public"
+| project TimeGenerated, RemoteIP, RemotePort, 
+          InitiatingProcessFileName, ActionType
+| order by TimeGenerated asc
+```
+
+**Results:**
+| TimeGenerated | RemoteIP | RemotePort | InitiatingProcessFileName | ActionType |
+|---------------|----------|------------|--------------------------|------------|
+| 12/12/2025 14:19:12 | 173.244.55.130 | 4444 | sarah_chen_notes.exe | ConnectionFailed |
+| 12/13/2025 10:13:39 | 173.244.55.130 | 4444 | sarah_chen_notes.exe | ConnectionFailed |
+| 12/13/2025 10:22:09 | 173.244.55.130 | 4444 | phtg.exe | ConnectionFailed |
+
+> **Investigative Note:** An initial query filtering on 
+> `InitiatingProcessFileName` returned no results because 
+> MDE normalises process names to lowercase in 
+> `DeviceNetworkEvents`. The correct approach was to 
+> filter using `InitiatingProcessSHA256` — the immutable 
+> hash identifier — which successfully returned all 
+> three C2 callback events regardless of filename 
+> or case normalisation.
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+all three ConnectionFailed events from the Meterpreter payload 
+to 173.244.55.130:4444, with both sarah_chen_notes.exe and 
+phtg.exe as initiating processes>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Block outbound connections to port 4444** at 
+  the Azure NSG and network perimeter level — 
+  this is not a legitimate business port and 
+  any outbound connection on 4444 should be 
+  treated as a critical indicator:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Alert — outbound connection on port 4444
+DeviceNetworkEvents
+| where RemotePort == 4444
+| where RemoteIPType == "Public"
+| where TimeGenerated > ago(1h)
+| project TimeGenerated, DeviceName, RemoteIP, 
+          RemotePort, ActionType,
+          InitiatingProcessFileName,
+          InitiatingProcessSHA256
+```
 
+- **Block the entire `173.244.55.0/24` subnet** 
+  at all network controls immediately — three 
+  confirmed malicious IPs in this subnet across 
+  multiple attack phases justify blocking the 
+  entire range
+- **Hunt for any outbound connection to 
+  non-standard ports from `C:\ProgramData`-based 
+  processes** — legitimate service executables 
+  in `ProgramData` rarely need to make outbound 
+  connections on non-standard ports:
+
+```kql
+// Hunt — non-standard port outbound from ProgramData process
+DeviceNetworkEvents
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where RemotePort !in (80, 443, 8080, 8443, 53, 
+                         123, 25, 587, 993, 995)
+| where RemoteIPType == "Public"
+| where InitiatingProcessFileName !in 
+    ("svchost.exe", "lsass.exe", "services.exe",
+     "MsMpEng.exe", "msiexec.exe")
+| project TimeGenerated, DeviceName, RemoteIP, 
+          RemotePort, ActionType,
+          InitiatingProcessFileName,
+          InitiatingProcessSHA256
+| order by TimeGenerated desc
+```
+
+- **Implement egress filtering** — all outbound 
+  connections from PHTG endpoints should be 
+  restricted to approved destination IPs and 
+  ports. Any connection to an unapproved 
+  destination should be blocked and alerted. 
+  This single control would have prevented 
+  all three C2 callback attempts from reaching 
+  the Meterpreter listener
+- **Use SHA256-based process network monitoring** — 
+  alert on any network connection initiated by 
+  a process with the known malicious hash, 
+  regardless of filename:
+
+```kql
+// Alert — known malicious hash initiating 
+// any network connection
+DeviceNetworkEvents
+| where InitiatingProcessSHA256 == 
+    "224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695"
+| where TimeGenerated > ago(1h)
+| project TimeGenerated, DeviceName, RemoteIP, 
+          RemotePort, ActionType,
+          InitiatingProcessFileName
+```
 </details>
 
 ---
