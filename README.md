@@ -250,7 +250,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1055 | Process Injection | Defense Evasion / Privilege Escalation | 🔴 Critical |
 | T1562.001 | Impair Defenses: Disable or Modify Tools | Defense Evasion | 🔴 Critical |
 | T1588.001 | Obtain Capabilities: Malware | Resource Development | 🟠 High | 
-| 31 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 31 | | T1562.001 | Impair Defenses: Disable or Modify Tools | Defense Evasion | 🔴 Critical | 
+| T1562 | Impair Defenses | Defense Evasion | 🔴 Critical | 
+| T1078.003 | Valid Accounts: Local Accounts | Defense Evasion | 🔴 Critical | 
+| T1059.001 | Command and Scripting: PowerShell | Execution | 🟠 High |
+| T1112 | Modify Registry | Defense Evasion | 🟠 High |
 | 32 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 33 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 34 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -4657,35 +4661,253 @@ DeviceEvents
 <summary id="-flag-31">🚩 <strong>Flag 31: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify the specific change to Microsoft Defender's operating 
+state that occurred between the three quarantine events and the 
+subsequent unblocked execution of the Meterpreter payload on 
+`azwks-phtg-02` — determining the defensive gap that allowed 
+the threat actor to successfully execute the payload despite 
+prior detections.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `Passive mode`**
+
+Microsoft Defender was switched from **active mode** to 
+**passive mode** between the quarantine events and the 
+successful execution. The `ReportSource` field in 
+`DeviceEvents` telemetry explicitly confirms this — all 
+three detection events after the mode change are logged 
+with `"ReportSource": "Windows Defender Antivirus passive 
+mode"`, meaning Defender detected the payload but 
+relinquished blocking responsibility to a designated 
+primary AV engine that either did not exist or did not 
+act.
+
+**Timeline of Events:**
+```
+14:11 – 14:17  ← Defender ACTIVE MODE
+    Payload detected and quarantined (3x)
+    Defender blocks execution successfully
+
+         ↓  [Defender switched to PASSIVE MODE]
+
+14:18:52 UTC   ← Defender PASSIVE MODE
+    Payload detected: Trojan:Win32/Meterpreter.RPZ!MTB
+    ReportSource: "Windows Defender Antivirus passive mode"
+    ACTION: Logged only — NO BLOCK
+
+14:20:41 UTC   ← Defender PASSIVE MODE
+    Payload detected again
+    ACTION: Logged only — NO BLOCK
+
+14:22:12 UTC   ← Defender PASSIVE MODE
+    Payload detected again
+    ACTION: Logged only — NO BLOCK
+
+         ↓
+
+Payload executes successfully — Meterpreter active
+```
 
 ### 🔍 Evidence
-
 | Field | Value |
-|------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+|-------|-------|
+| Host | azwks-phtg-02 |
+| Defender Mode (Quarantine Phase) | Active mode |
+| Defender Mode (Execution Phase) | Passive mode |
+| Mode Change Window | Between 14:17 and 14:18 on 12/12/2025 |
+| Detection Count in Passive Mode | 3 |
+| Blocking Actions in Passive Mode | 0 |
+| ThreatName | Trojan:Win32/Meterpreter.RPZ!MTB |
+| ReportSource | Windows Defender Antivirus passive mode |
+| SHA256 | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 |
+| Account | vmadminusername |
+| Timestamp | 12/12/2025 14:18:52 – 14:22:12 UTC |
+| Process | N/A — Antivirus state change event |
+| Parent Process | N/A — Antivirus state change event |
+| Command Line | N/A — Antivirus state change event |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The transition from active to passive mode is the single 
+most critical defensive failure in this investigation:
+
+- **Active mode provides real protection** — When 
+  Defender was in active mode, it successfully 
+  quarantined the Meterpreter payload three times, 
+  preventing execution entirely. This demonstrates 
+  that the detection capability was functioning 
+  correctly — the failure was in the operating 
+  mode, not the detection engine
+- **Passive mode is detection without protection** — 
+  In passive mode, Defender continues to scan 
+  and detect threats but defers all remediation 
+  actions to a designated primary AV product. 
+  If no other AV is present or functioning, 
+  passive mode provides zero protection — 
+  it is effectively a threat logging service 
+  with no blocking capability
+- **The mode change was almost certainly 
+  deliberate** — The transition from active 
+  to passive mode occurring in the narrow 
+  window between quarantine events and 
+  successful payload execution is not 
+  coincidental. The threat actor, operating 
+  interactively via RDP with local 
+  administrator privileges, had the access 
+  and capability to modify Defender's 
+  operating mode through:
+  - PowerShell cmdlets (`Set-MpPreference`)
+  - Registry modifications
+  - Windows Security Center API calls
+  - Installation of a dummy AV product 
+    that forces Defender to passive mode
+- **This represents deliberate defence 
+  impairment** — The threat actor identified 
+  that Defender was blocking their payload, 
+  modified Defender's operating state to 
+  remove the blocking capability, and then 
+  successfully executed the payload. This 
+  is a sophisticated, adaptive response 
+  to an active defensive control
+- **Three quarantines → mode change → 
+  successful execution** tells the full 
+  story — the attacker was persistent, 
+  noticed the failures, diagnosed the 
+  cause, and took targeted action to 
+  neutralise the specific control 
+  preventing their success
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Query DeviceEvents for Defender detection events
+// ReportSource field reveals operating mode at time of detection
+DeviceEvents
+| where DeviceName == "azwks-phtg-02"
+| where ActionType in ("AntivirusDetection", 
+                       "AntivirusDetectionActionType")
+| where SHA256 == "224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695"
+| extend ParsedFields = parse_json(AdditionalFields)
+| extend ThreatName = tostring(ParsedFields.ThreatName)
+| extend ReportSource = tostring(ParsedFields.ReportSource)
+| project TimeGenerated, ActionType, ThreatName, 
+          ReportSource, SHA256
+| order by TimeGenerated asc
+```
+
+**Results:**
+| TimeGenerated | ThreatName | ReportSource |
+|---------------|------------|--------------|
+| 12/12/2025 14:18:52 | Trojan:Win32/Meterpreter.RPZ!MTB | Windows Defender Antivirus passive mode |
+| 12/12/2025 14:20:41 | Trojan:Win32/Meterpreter.RPZ!MTB | Windows Defender Antivirus passive mode |
+| 12/12/2025 14:22:12 | Trojan:Win32/Meterpreter.RPZ!MTB | Windows Defender Antivirus passive mode |
+
+```kql
+// Hunt for Defender configuration change events
+// around the mode transition window
+DeviceEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between 
+    (datetime(2025-12-12T14:10:00Z) .. 
+     datetime(2025-12-12T14:25:00Z))
+| where ActionType contains "Antivirus" 
+    or ActionType contains "Defender"
+    or ActionType contains "Security"
+| project TimeGenerated, ActionType, AdditionalFields
+| order by TimeGenerated asc
+```
+
+```kql
+// Hunt for PowerShell commands that could modify 
+// Defender operating mode during the session
+DeviceProcessEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between 
+    (datetime(2025-12-12T14:00:00Z) .. 
+     datetime(2025-12-12T15:00:00Z))
+| where ProcessCommandLine contains "MpPreference"
+    or ProcessCommandLine contains "DisableRealtimeMonitoring"
+    or ProcessCommandLine contains "PassiveModeEnabled"
+    or ProcessCommandLine contains "WindowsDefender"
+| project TimeGenerated, FileName, ProcessCommandLine,
+          InitiatingProcessFileName,
+          InitiatingProcessAccountName
+```
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+all three AntivirusDetectionActionType events with 
+ReportSource confirming "Windows Defender Antivirus 
+passive mode" — demonstrating that Defender detected 
+but did not block the payload after the mode change>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Alert immediately on any Defender mode change 
+  on a production endpoint** — switching from 
+  active to passive mode should never occur 
+  without a formal change management process:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Alert — Defender mode change detection
+DeviceEvents
+| where ActionType contains "AntivirusStateChange"
+    or ActionType contains "DefenderConfigChange"
+| where TimeGenerated > ago(1h)
+| project TimeGenerated, DeviceName, ActionType, 
+          AdditionalFields
+```
 
+- **Monitor for PowerShell commands that modify 
+  Defender configuration** — `Set-MpPreference` 
+  with passive mode parameters should trigger 
+  an immediate P1 alert:
+
+```kql
+// Alert — PowerShell Defender tampering
+DeviceProcessEvents
+| where FileName in ("powershell.exe", "pwsh.exe")
+| where ProcessCommandLine has_any (
+    "PassiveModeEnabled", 
+    "DisableRealtimeMonitoring",
+    "DisableBehaviorMonitoring",
+    "Set-MpPreference",
+    "Add-MpPreference")
+| where TimeGenerated > ago(1h)
+| project TimeGenerated, DeviceName, 
+          ProcessCommandLine,
+          InitiatingProcessAccountName
+```
+
+- **Implement Microsoft Defender Tamper Protection** — 
+  Tamper Protection prevents unauthorised changes 
+  to Defender settings including operating mode, 
+  real-time protection, and exclusions. It should 
+  be enabled on all PHTG endpoints and enforced 
+  via Intune or Group Policy
+- **Alert on `AntivirusDetectionActionType` events 
+  with passive mode in `ReportSource`** — any 
+  detection that Defender logged but did not 
+  act on due to passive mode should immediately 
+  trigger a manual review:
+
+```kql
+// Alert — AV detection without blocking action
+DeviceEvents
+| where ActionType == "AntivirusDetectionActionType"
+| where TimeGenerated > ago(1h)
+| extend ParsedFields = parse_json(AdditionalFields)
+| extend ReportSource = tostring(ParsedFields.ReportSource)
+| extend ThreatName = tostring(ParsedFields.ThreatName)
+| where ReportSource contains "passive"
+| project TimeGenerated, DeviceName, 
+          ThreatName, ReportSource, SHA256
+```
+
+- **Enforce Defender active mode via Microsoft 
+  Intune compliance policies** — flag any endpoint 
+  where Defender is not operating in active mode 
+  as non-compliant, triggering automatic 
+  remediation and access restrictions until 
+  the correct configuration is restored
 </details>
 
 
