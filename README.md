@@ -265,7 +265,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1053.005 | Scheduled Task/Job: Scheduled Task | Persistence | 🔴 Critical |
 | T1036.005 | Masquerading: Match Legitimate Name or Location | Defense Evasion | 🔴 Critical |
 | T1105 | Ingress Tool Transfer | Command and Control | 🔴 Critical | 
-| 34 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 34 | | T1059.003 | Command and Scripting: Windows Command Shell | Execution | 🔴 Critical |
+| T1053.005 | Scheduled Task/Job: Scheduled Task | Persistence | 🔴 Critical |
+| T1036.005 | Masquerading: Match Legitimate Name or Location | Defense Evasion | 🔴 Critical |
+| T1543.003 | Create or Modify System Process: Windows Service | Persistence | 🟠 High |
+| T1105 | Ingress Tool Transfer | Command and Control | 🔴 Critical |
 | 35 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 36 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 37 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -5331,35 +5335,197 @@ DeviceProcessEvents
 <summary id="-flag-34">🚩 <strong>Flag 34: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Extract the full file path of the batch file responsible for 
+launching the Meterpreter payload during the Phase 2 execution 
+on 13 December 2025 — confirming the exact location of the 
+persistence mechanism within the PHTG HealthCloud service 
+directory and establishing it as a key indicator of compromise.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `C:\ProgramData\PHTG\HealthCloud\Launch.bat`**
+
+The full path of the batch file that launched `PHTG.exe` 
+during Phase 2 is **`C:\ProgramData\PHTG\HealthCloud\Launch.bat`**, 
+extracted directly from the `InitiatingProcessCommandLine` 
+field in `DeviceProcessEvents`:
+
+```
+cmd.exe /c ""C:\ProgramData\PHTG\HealthCloud\Launch.bat" "
+```
+
+This batch file was deliberately placed within PHTG's 
+legitimate HealthCloud service directory to blend with 
+expected service infrastructure and avoid detection 
+during routine file system review.
 
 ### 🔍 Evidence
-
 | Field | Value |
-|------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+|-------|-------|
+| Host | azwks-phtg-02 |
+| Batch File Full Path | C:\ProgramData\PHTG\HealthCloud\Launch.bat |
+| Initiating Command Line | cmd.exe /c ""C:\ProgramData\PHTG\HealthCloud\Launch.bat" " |
+| Payload Launched | PHTG.exe |
+| Payload Location | C:\ProgramData\PHTG\HealthCloud\PHTG.exe |
+| Phase 2 Timestamps | 12/13/2025 10:21:48 UTC, 10:22:36 UTC |
+| Account | vmadminusername |
+| SHA256 (Payload) | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 |
+| Malware Family | Trojan:Win32/Meterpreter.RPZ!MTB |
+| Timestamp | 12/13/2025 10:21:48 UTC |
+| Process | PHTG.exe |
+| Parent Process | cmd.exe |
+| Command Line | cmd.exe /c ""C:\ProgramData\PHTG\HealthCloud\Launch.bat" " |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The location and naming of `Launch.bat` is a carefully 
+calculated persistence technique:
+
+- **`C:\ProgramData\PHTG\HealthCloud\` is the legitimate 
+  service directory** — The hunt brief explicitly states 
+  that HealthCloud stores "background service executables" 
+  and "diagnostic cache directories" in this location. 
+  The threat actor placed `Launch.bat` here to make it 
+  indistinguishable from legitimate HealthCloud components 
+  during casual review
+- **`Launch.bat` is a plausible service component name** — 
+  A file named `Launch.bat` in a service directory would 
+  appear entirely consistent with a legitimate startup 
+  or launch script for the HealthCloud service — 
+  making it unlikely to raise suspicion without 
+  hash-based or content-based inspection
+- **The full path is the definitive IOC** — 
+  `C:\ProgramData\PHTG\HealthCloud\Launch.bat` 
+  is a concrete, actionable indicator of compromise 
+  that can be immediately used to:
+  - Search for the file across the entire PHTG estate
+  - Identify any other devices where this persistence 
+    mechanism was deployed
+  - Confirm lateral movement if found on additional hosts
+- **`cmd.exe /c` confirms non-interactive execution** — 
+  The `/c` flag causes `cmd.exe` to execute the batch 
+  file and then terminate — consistent with a scheduled 
+  task or service trigger rather than an interactive 
+  command shell session. This confirms `Launch.bat` 
+  was designed for automated, non-interactive 
+  re-execution of the payload
+- **The double-quote wrapping in the command line** — 
+  `cmd.exe /c ""C:\ProgramData\PHTG\HealthCloud\Launch.bat" "` 
+  uses an extra set of quotes around the full command, 
+  which is a common batch file invocation pattern 
+  used when the path contains spaces or when the 
+  command is embedded in a scheduled task definition
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Extract full batch file path from initiating 
+// command line of Phase 2 payload executions
+DeviceProcessEvents
+| where DeviceName == "azwks-phtg-02"
+| where FileName == "PHTG.exe"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| project TimeGenerated, FileName, ProcessCommandLine,
+          InitiatingProcessFileName,
+          InitiatingProcessCommandLine,
+          InitiatingProcessAccountName
+| order by TimeGenerated asc
+```
+
+**Results:**
+| TimeGenerated | FileName | InitiatingProcessFileName | InitiatingProcessCommandLine |
+|---------------|----------|--------------------------|------------------------------|
+| 12/13/2025 10:21:48 | PHTG.exe | cmd.exe | cmd.exe /c ""C:\ProgramData\PHTG\HealthCloud\Launch.bat" " |
+| 12/13/2025 10:22:36 | PHTG.exe | cmd.exe | cmd.exe /c ""C:\ProgramData\PHTG\HealthCloud\Launch.bat" " |
+
+```kql
+// Confirm Launch.bat file creation event
+DeviceFileEvents
+| where DeviceName == "azwks-phtg-02"
+| where FileName == "Launch.bat"
+| where FolderPath contains "HealthCloud"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| project TimeGenerated, FileName, FolderPath, 
+          ActionType, InitiatingProcessAccountName
+```
+
+```kql
+// Hunt for Launch.bat across entire PHTG estate
+// to identify lateral movement
+DeviceFileEvents
+| where FileName == "Launch.bat"
+| where FolderPath contains "HealthCloud"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| summarize count() by DeviceName, FolderPath, ActionType
+```
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+the full InitiatingProcessCommandLine value containing 
+C:\ProgramData\PHTG\HealthCloud\Launch.bat for both 
+Phase 2 PHTG.exe execution events on 12/13/2025>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Immediately locate and delete `Launch.bat`** from 
+  all PHTG endpoints as part of incident remediation — 
+  this is the persistence mechanism that ensures 
+  the Meterpreter payload re-executes automatically:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Confirm Launch.bat presence and current status
+DeviceFileEvents
+| where FileName == "Launch.bat"
+| where FolderPath == "C:\\ProgramData\\PHTG\\HealthCloud\\"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| project TimeGenerated, DeviceName, FileName, 
+          FolderPath, ActionType,
+          InitiatingProcessAccountName
+| order by TimeGenerated desc
+```
 
+- **Alert on batch file creation in any service 
+  directory under `C:\ProgramData`** by non-system 
+  accounts — this is a high-fidelity persistence 
+  indicator:
+
+```kql
+// Alert — batch file created in ProgramData 
+// by non-system account
+DeviceFileEvents
+| where ActionType == "FileCreated"
+| where FileName endswith ".bat"
+| where FolderPath startswith "C:\\ProgramData\\"
+| where InitiatingProcessAccountName !in 
+    ("system", "local service", "network service")
+| where TimeGenerated > ago(24h)
+| project TimeGenerated, DeviceName, FileName, 
+          FolderPath, InitiatingProcessAccountName
+```
+
+- **Audit all scheduled tasks on `azwks-phtg-02`** — 
+  the `cmd.exe /c` invocation pattern strongly suggests 
+  `Launch.bat` was triggered by a scheduled task. 
+  Every scheduled task should be reviewed against 
+  a known-good baseline and any referencing 
+  `Launch.bat` or `PHTG.exe` should be 
+  immediately deleted:
+
+```kql
+// Hunt — scheduled task creation by compromised account
+DeviceProcessEvents
+| where FileName == "schtasks.exe"
+| where TimeGenerated >= datetime(2025-12-12T05:47:45Z)
+| where InitiatingProcessAccountName =~ "vmadminusername"
+| project TimeGenerated, DeviceName, FileName,
+          ProcessCommandLine,
+          InitiatingProcessAccountName
+```
+
+- **Implement file integrity monitoring on all 
+  service directories** — any new file created 
+  in `C:\ProgramData\PHTG\HealthCloud\` that 
+  was not part of the original HealthCloud 
+  deployment package should trigger an 
+  immediate alert, regardless of filename 
+  or extension
 </details>
 
 ---
