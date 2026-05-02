@@ -260,7 +260,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1059.003 | Command and Scripting: Windows Command Shell | Execution | 🔴 Critical |
 | T1036.005 | Masquerading: Match Legitimate Name or Location | Defense Evasion | 🔴 Critical |
 | T1105 | Ingress Tool Transfer | Command and Control | 🔴 Critical |
-| 33 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 33 | | T1059.003 | Command and Scripting: Windows Command Shell | Execution | 🔴 Critical |
+| T1547.001 | Boot or Logon Autostart: Registry Run Keys / Startup Folder | Persistence | 🔴 Critical |
+| T1053.005 | Scheduled Task/Job: Scheduled Task | Persistence | 🔴 Critical |
+| T1036.005 | Masquerading: Match Legitimate Name or Location | Defense Evasion | 🔴 Critical |
+| T1105 | Ingress Tool Transfer | Command and Control | 🔴 Critical | 
 | 34 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 35 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 36 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -5114,35 +5118,210 @@ PayloadExecs
 <summary id="-flag-33">🚩 <strong>Flag 33: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify the initiating process responsible for launching the 
+payload during the second execution phase on 13 December 2025 — 
+distinguishing the automated persistence mechanism from the 
+manual interactive execution observed in Phase 1, and confirming 
+how the threat actor engineered persistent payload re-execution 
+without requiring continued hands-on-keyboard interaction.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `cmd.exe`**
+
+The Phase 2 executions of the payload (`PHTG.exe`) were 
+initiated by **`cmd.exe`** — specifically executing 
+`C:\ProgramData\PHTG\HealthCloud\Launch.bat` via the 
+command line `cmd.exe /c "C:\ProgramData\PHTG\HealthCloud\Launch.bat"`. 
+This represents a fundamental shift from Phase 1's manual 
+double-click execution via `explorer.exe` to automated 
+batch file-based persistence execution.
+
+**Execution Phase Comparison:**
+
+| Phase | Date | Payload Name | Initiating Process | Launch Method |
+|-------|------|-------------|-------------------|---------------|
+| Phase 1 | 12/12/2025 | Sarah_Chen_Notes.exe | explorer.exe | Manual double-click |
+| Phase 2 | 12/13/2025 | PHTG.exe | cmd.exe | Launch.bat automation |
 
 ### 🔍 Evidence
-
 | Field | Value |
-|------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+|-------|-------|
+| Host | azwks-phtg-02 |
+| Phase 2 Initiating Process | cmd.exe |
+| Phase 2 Payload Name | PHTG.exe |
+| Phase 2 Launch Mechanism | C:\ProgramData\PHTG\HealthCloud\Launch.bat |
+| Full Command Line | cmd.exe /c "C:\ProgramData\PHTG\HealthCloud\Launch.bat" |
+| Phase 2 Timestamps | 12/13/2025 10:21:48 UTC, 10:22:36 UTC |
+| Phase 2 Location | C:\ProgramData\PHTG\HealthCloud\ |
+| SHA256 | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 |
+| Account | vmadminusername |
+| Timestamp | 12/13/2025 10:21:48 – 10:22:36 UTC |
+| Process | PHTG.exe |
+| Parent Process | cmd.exe |
+| Command Line | cmd.exe /c "C:\ProgramData\PHTG\HealthCloud\Launch.bat" |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The shift from `explorer.exe` to `cmd.exe` as the initiating 
+process between Phase 1 and Phase 2 is operationally 
+significant for several reasons:
+
+- **Phase 1 was manual — Phase 2 is automated** — 
+  `explorer.exe` as the parent process indicates 
+  direct user interaction (double-clicking a file). 
+  `cmd.exe` executing a `.bat` file indicates 
+  automated, scripted execution that does not 
+  require the threat actor to be actively logged 
+  in via RDP
+- **`Launch.bat` is a persistence mechanism** — 
+  The creation of `Launch.bat` in the HealthCloud 
+  directory represents the threat actor engineering 
+  a method to re-execute the Meterpreter payload 
+  automatically — whether triggered by a scheduled 
+  task, a service, a startup script, or manual 
+  invocation. This ensures the payload can be 
+  re-launched even if the RDP session ends
+- **The HealthCloud directory provides cover** — 
+  `cmd.exe` launching a `.bat` file from 
+  `C:\ProgramData\PHTG\HealthCloud\` would 
+  appear superficially legitimate in the 
+  context of a service that legitimately 
+  uses scheduled PowerShell tasks and 
+  background service executables in 
+  that same directory
+- **The two-phase approach shows attacker 
+  adaptability** — Phase 1 failed to establish 
+  a C2 session (all callbacks to 
+  `173.244.55.130:4444` failed). Rather 
+  than abandoning the operation, the threat 
+  actor restructured their approach — 
+  renaming the payload, relocating it, 
+  creating a batch launcher, and 
+  re-attempting C2 establishment through 
+  an automated mechanism
+- **`cmd.exe` as parent provides an 
+  attribution anchor** — The specific 
+  command line `cmd.exe /c "..."` is a 
+  forensic artifact that confirms the 
+  batch file was the direct launcher 
+  and enables reconstruction of the 
+  full persistence chain
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Process execution events for both payload phases
+DeviceProcessEvents
+| where DeviceName == "azwks-phtg-02"
+| where SHA256 == "224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695"
+    or FileName in ("Sarah_Chen_Notes.exe", "PHTG.exe")
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| project TimeGenerated, FileName, ProcessCommandLine,
+          InitiatingProcessFileName,
+          InitiatingProcessCommandLine,
+          InitiatingProcessAccountName
+| order by TimeGenerated asc
+```
+
+**Results — Phase 2 Executions:**
+| TimeGenerated | FileName | InitiatingProcessFileName | InitiatingProcessCommandLine |
+|---------------|----------|--------------------------|------------------------------|
+| 12/13/2025 10:21:48 | PHTG.exe | **cmd.exe** | cmd.exe /c "C:\ProgramData\PHTG\HealthCloud\Launch.bat" |
+| 12/13/2025 10:22:36 | PHTG.exe | **cmd.exe** | cmd.exe /c "C:\ProgramData\PHTG\HealthCloud\Launch.bat" |
+
+```kql
+// Confirm Launch.bat creation in DeviceFileEvents
+DeviceFileEvents
+| where DeviceName == "azwks-phtg-02"
+| where FileName == "Launch.bat"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| project TimeGenerated, FileName, FolderPath, 
+          ActionType, SHA256,
+          InitiatingProcessAccountName
+| order by TimeGenerated asc
+```
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+PHTG.exe initiated by cmd.exe with the full Launch.bat 
+command line on 12/13/2025, contrasted with the Phase 1 
+Sarah_Chen_Notes.exe executions initiated by explorer.exe 
+on 12/12/2025>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Alert on `cmd.exe` executing `.bat` files from 
+  `C:\ProgramData`** — batch file execution from 
+  ProgramData subdirectories is anomalous unless 
+  associated with a known, inventoried software 
+  installation:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Alert — batch file execution from ProgramData
+DeviceProcessEvents
+| where FileName =~ "cmd.exe"
+| where ProcessCommandLine contains "ProgramData"
+| where ProcessCommandLine endswith ".bat\""
+    or ProcessCommandLine contains ".bat\" "
+| where TimeGenerated > ago(24h)
+| project TimeGenerated, DeviceName, 
+          ProcessCommandLine,
+          InitiatingProcessFileName,
+          InitiatingProcessAccountName
+```
 
+- **Inventory all `.bat` files in service directories** — 
+  particularly newly deployed services like HealthCloud. 
+  Any batch file not present in the original deployment 
+  package should trigger an immediate investigation:
+
+```kql
+// Hunt — unexpected batch files in HealthCloud directory
+DeviceFileEvents
+| where FolderPath contains "HealthCloud"
+| where FileName endswith ".bat"
+| where ActionType == "FileCreated"
+| where TimeGenerated between 
+    (datetime(2025-12-09) .. datetime(2025-12-23))
+| project TimeGenerated, DeviceName, FileName, 
+          FolderPath, SHA256,
+          InitiatingProcessAccountName
+```
+
+- **Monitor parent-child process relationships** — 
+  `cmd.exe` spawning a known malicious SHA256 is 
+  a high-fidelity detection opportunity regardless 
+  of the filename used:
+
+```kql
+// Alert — cmd.exe spawning known malicious binary
+DeviceProcessEvents
+| where InitiatingProcessFileName =~ "cmd.exe"
+| where SHA256 == 
+    "224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695"
+| where TimeGenerated > ago(24h)
+| project TimeGenerated, DeviceName, FileName, 
+          ProcessCommandLine,
+          InitiatingProcessCommandLine,
+          InitiatingProcessAccountName
+```
+
+- **Audit scheduled tasks and services for 
+  unauthorised entries** — the Phase 2 execution 
+  pattern strongly suggests `Launch.bat` was 
+  triggered by a scheduled task or service 
+  registered in the HealthCloud context. 
+  All scheduled tasks should be audited 
+  against a known-good baseline:
+
+```kql
+// Hunt — scheduled task creation events
+DeviceProcessEvents
+| where FileName in ("schtasks.exe", "taskschd.msc")
+| where TimeGenerated >= datetime(2025-12-12T05:47:45Z)
+| where InitiatingProcessAccountName =~ "vmadminusername"
+| project TimeGenerated, DeviceName, FileName, 
+          ProcessCommandLine,
+          InitiatingProcessAccountName
+```
 </details>
 
 ---
