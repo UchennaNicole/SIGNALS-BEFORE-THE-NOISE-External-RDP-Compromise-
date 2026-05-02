@@ -215,7 +215,10 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1583.003 | Acquire Infrastructure: Virtual Private Server | Resource Development | 🟠 High |
 | T1090 | Proxy | Defense Evasion | 🟠 High |
 | T1008 | Fallback Channels | Command and Control | 🟠 High |
-| 24 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 24 | | T1059.003 | Command and Scripting Interpreter: Windows Command Shell | Execution | 🔴 Critical |
+| T1059 | Command and Scripting Interpreter | Execution | 🔴 Critical |
+| T1021.001 | Remote Services: Remote Desktop Protocol | Lateral Movement | 🔴 Critical |
+| T1078.003 | Valid Accounts: Local Accounts | Defense Evasion | 🔴 Critical | 
 | 25 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 26 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 27 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -3357,34 +3360,165 @@ DeviceNetworkEvents
 <summary id="-flag-24">🚩 <strong>Flag 24: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify the first process executed on `azwks-phtg-02` after the 
+confirmed initial access event at 12/12/2025 05:47:45 UTC that 
+indicates deliberate, purposeful human operator interaction — 
+distinguishing it from the automated session startup noise that 
+follows any RDP logon event.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `cmd.exe`**
+
+After filtering out automated Windows session startup processes 
+(`dwm.exe`, `sihost.exe`, `taskhostw.exe`, `explorer.exe`, 
+`SecurityHealthSystray.exe`, `OneDrive.exe`, `ngentask.exe`, 
+`conhost.exe` etc.), the first process indicative of deliberate 
+human operator interaction was **`cmd.exe`** — a Command Prompt 
+session opened interactively by the threat actor to begin 
+hands-on-keyboard activity on the compromised endpoint.
+
+> **Investigative Note:** This finding required careful 
+> manual triage of the full process list. Multiple processes 
+> were initially investigated before correctly identifying 
+> `cmd.exe` as the first purposeful operator action:
+> - `msedge.exe` — Incorrect (launched by PowerShell, 
+>   not direct operator interaction)
+> - `powershell.exe` — Incorrect (launched automatically 
+>   as part of session initialisation)
+> - `whoami.exe` — Incorrect (occurred later in the 
+>   session, after initial operator interaction)
+> - `cmd.exe` — ✅ Correct (first direct interactive 
+>   command shell opened by the operator)
 
 ### 🔍 Evidence
-
 | Field | Value |
-|------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+|-------|-------|
+| Host | azwks-phtg-02 |
+| First Notable Process | cmd.exe |
+| Account | vmadminusername |
+| Parent Process | explorer.exe |
+| Timestamp | 12/12/2025 (post 05:47:45 UTC) |
+| Session Context | First Uruguay RDP session |
+| Investigation Window | 09 December – 23 December 2025 UTC |
+| Process | cmd.exe |
+| Parent Process | explorer.exe |
+| Command Line | cmd.exe |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The identification of `cmd.exe` as the first purposeful 
+operator action is significant for several reasons:
+
+- **Confirms hands-on-keyboard activity** — The opening 
+  of a Command Prompt session is a deliberate human action. 
+  Automated tools and scripts do not typically open 
+  interactive `cmd.exe` sessions — they invoke commands 
+  directly. A `cmd.exe` launched from `explorer.exe` 
+  indicates the operator clicked or opened a terminal 
+  window manually
+- **Establishes the operator's preferred initial toolset** — 
+  The choice of `cmd.exe` over `powershell.exe` as the 
+  first interactive tool provides a signal about operator 
+  preference and familiarity. This can contribute to 
+  threat actor profiling and pattern recognition across 
+  multiple incidents
+- **Marks the boundary between automated and manual activity** — 
+  Everything before `cmd.exe` in the process timeline is 
+  Windows session initialisation noise. Everything from 
+  `cmd.exe` onwards represents deliberate threat actor 
+  decisions and actions
+- **Anchors the operator activity timeline** — The 
+  timestamp of the first `cmd.exe` launch establishes 
+  when the threat actor transitioned from passive 
+  authenticated presence to active hands-on-keyboard 
+  operation — a critical forensic marker for 
+  incident timeline reconstruction
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Full process timeline after initial access — 
+// used to manually triage session startup noise
+DeviceProcessEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated >= datetime(2025-12-12T05:47:45Z)
+| where InitiatingProcessAccountName =~ "vmadminusername"
+| project TimeGenerated, FileName, ProcessCommandLine, 
+          InitiatingProcessFileName, InitiatingProcessCommandLine
+| order by TimeGenerated asc
+```
+
+```kql
+// Focused query — known operator tools only
+// Used to filter out session startup noise
+DeviceProcessEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated >= datetime(2025-12-12T05:47:45Z)
+| where InitiatingProcessAccountName =~ "vmadminusername"
+| where FileName in ("cmd.exe", "powershell.exe", "pwsh.exe", 
+                     "wscript.exe", "cscript.exe", "mshta.exe", 
+                     "rundll32.exe", "reg.exe", "net.exe", 
+                     "whoami.exe", "ipconfig.exe", "tasklist.exe", 
+                     "nltest.exe", "msedge.exe", "notepad.exe")
+| project TimeGenerated, FileName, ProcessCommandLine, 
+          InitiatingProcessFileName
+| order by TimeGenerated asc
+```
+
+```kql
+// Narrow window query — isolating first operator 
+// interaction period on 12/12/2025
+DeviceProcessEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-12T13:32:00Z) 
+                            .. datetime(2025-12-12T14:00:00Z))
+| where InitiatingProcessAccountName =~ "vmadminusername"
+| project TimeGenerated, FileName, ProcessCommandLine, 
+          InitiatingProcessFileName
+| order by TimeGenerated asc
+```
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+cmd.exe as the first purposeful operator process launched 
+from explorer.exe after the initial RDP session startup 
+noise on 12/12/2025>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Alert on interactive `cmd.exe` or `powershell.exe` 
+  processes spawned from `explorer.exe` under accounts 
+  that recently authenticated via RDP from public IPs** — 
+  this combination is a high-fidelity indicator of 
+  hands-on-keyboard threat actor activity:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Alert — interactive command shell after external RDP logon
+let RDPSessions =
+    DeviceLogonEvents
+    | where LogonType == "RemoteInteractive"
+    | where ActionType == "LogonSuccess"
+    | where RemoteIPType == "Public"
+    | project LogonTime = TimeGenerated, 
+              DeviceName, AccountName, RemoteIP;
+DeviceProcessEvents
+| where FileName in ("cmd.exe", "powershell.exe", "pwsh.exe")
+| where InitiatingProcessFileName =~ "explorer.exe"
+| join kind=inner RDPSessions on DeviceName, AccountName
+| where TimeGenerated between (LogonTime .. (LogonTime + 30m))
+| project TimeGenerated, DeviceName, AccountName, 
+          FileName, ProcessCommandLine, RemoteIP
+```
+
+- **Establish a process baseline for session startup** — 
+  document all processes that legitimately run during 
+  Windows RDP session initialisation so that any 
+  deviation (particularly interactive shells) is 
+  immediately flagged
+- **Monitor for `cmd.exe` and `powershell.exe` 
+  spawned from `explorer.exe`** as a general 
+  detection rule — while not exclusively malicious, 
+  this pattern in the context of an external RDP 
+  session from an unexpected country is a critical 
+  indicator requiring immediate investigation
 
 </details>
 
