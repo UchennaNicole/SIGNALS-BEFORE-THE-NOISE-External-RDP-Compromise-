@@ -224,7 +224,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1552.001 | Unsecured Credentials: Credentials in Files | Credential Access | 🔴 Critical |
 | T1213 | Data from Information Repositories | Collection | 🟠 High |
 | T1074.001 | Data Staged: Local Data Staging | Collection | 🟠 High |
-| 26 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 26 | | T1036.007 | Masquerading: Double File Extension | Defense Evasion | 🔴 Critical |
+| T1036 | Masquerading | Defense Evasion | 🔴 Critical |
+| T1027 | Obfuscated Files or Information | Defense Evasion | 🟠 High |
+| T1204.002 | User Execution: Malicious File | Execution | 🔴 Critical |
+| T1105 | Ingress Tool Transfer | Command and Control | 🔴 Critical |
 | 27 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 28 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 29 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -3692,35 +3696,175 @@ DeviceProcessEvents
 <summary id="-flag-26">🚩 <strong>Flag 26: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Track the payload file through its rename chain in 
+`DeviceFileEvents` to identify the first filename where the 
+file extension was changed to a Windows executable format — 
+marking the moment the payload transitioned from a disguised, 
+inert file into an executable that could be launched on the 
+compromised endpoint.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `Sarah_Chen_Notes.exe`**
+
+The first `FileRenamed` event where the payload's extension 
+was changed to a Windows executable format resulted in the 
+filename **`Sarah_Chen_Notes.exe`**. The file arrived on the 
+system disguised with a `.Txt` extension 
+(`Sarah_Chen_Notes.exe.Txt`) and was renamed to 
+`Sarah_Chen_Notes.exe` at **12/12/2025 14:18:38 UTC** — 
+converting it from an apparently benign text file into a 
+directly executable Windows binary.
+
+**Rename Chain:**
+```
+Sarah_Chen_Notes.exe.Txt          ← Arrived disguised as text
+         ↓  [FileRenamed 12/12/2025 14:18:38]
+Sarah_Chen_Notes.exe              ← First executable extension ✅
+         ↓  [FileRenamed 12/13/2025 10:14:41 — moved]
+Sarah_Chen_Notes.exe              ← Relocated to HealthCloud directory
+         ↓  [FileRenamed 12/13/2025 10:16:22]
+PHTG.exe                          ← Final filename (blends with service)
+```
 
 ### 🔍 Evidence
-
 | Field | Value |
-|------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+|-------|-------|
+| Host | azwks-phtg-02 |
+| First Executable Filename | Sarah_Chen_Notes.exe |
+| Previous Filename | Sarah_Chen_Notes.exe.Txt |
+| Rename Timestamp | 12/12/2025 14:18:38 UTC |
+| Initial Location | C:\Users\vmAdminUsername\Documents\PHTG\ |
+| Final Location | C:\ProgramData\PHTG\HealthCloud\ |
+| Final Filename | PHTG.exe |
+| SHA256 | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 |
+| Account | vmadminusername |
+| Process | cmd.exe / explorer.exe |
+| Parent Process | explorer.exe |
+| Command Line | N/A — File operation |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The rename from `Sarah_Chen_Notes.exe.Txt` to 
+`Sarah_Chen_Notes.exe` is the critical activation event 
+for the payload:
+
+- **Double extension as a delivery technique** — 
+  `Sarah_Chen_Notes.exe.Txt` is a classic double 
+  extension lure. Windows hides known file extensions 
+  by default, meaning the file would appear as 
+  `Sarah_Chen_Notes.exe` to a user with default 
+  Explorer settings — disguising a `.Txt` file as 
+  an executable to any casual observer while 
+  preventing immediate execution until renamed
+- **The rename is a deliberate attacker action** — 
+  The transition from `.Txt` to `.exe` was performed 
+  by the threat actor during their interactive 
+  session. This is not an automated system action — 
+  it represents a conscious decision to activate 
+  the payload
+- **Social engineering via filename** — 
+  `Sarah_Chen_Notes.exe` is a deliberate reference 
+  to Sarah Chen, the Cloud Engineer whose LinkedIn 
+  post triggered this investigation. The attacker 
+  used her identity as a filename lure — suggesting 
+  they conducted additional research into her role 
+  after seeing the post and crafted a payload 
+  filename designed to appear legitimate to anyone 
+  reviewing the file system
+- **The SHA256 is consistent across all renames** — 
+  The hash `224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695` 
+  is identical across all three rename events, 
+  confirming it is the same file throughout — 
+  only the name and location changed, not the content
+- **Defender detected it immediately** — Within 
+  seconds of the rename to `Sarah_Chen_Notes.exe`, 
+  Microsoft Defender flagged the file as 
+  `Trojan:Win32/Meterpreter.RPZ!MTB` — but was 
+  running in passive mode and did not block it
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// FileRenamed events for payload — 
+// filtering for executable extensions
+// Excluding system noise (SoftwareDistribution, WinSxS)
+DeviceFileEvents
+| where DeviceName == "azwks-phtg-02"
+| where ActionType == "FileRenamed"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where FolderPath !contains "SoftwareDistribution"
+| where FolderPath !contains "Windows\\WinSxS"
+| where FileName endswith ".exe" 
+    or FileName endswith ".dll" 
+    or FileName endswith ".bat" 
+    or FileName endswith ".ps1" 
+    or FileName endswith ".cmd"
+| where InitiatingProcessAccountName != "system"
+| project TimeGenerated, FileName, PreviousFileName, 
+          FolderPath, InitiatingProcessAccountName
+| order by TimeGenerated asc
+```
+
+**Results — Payload Rename Chain:**
+| TimeGenerated | FileName | PreviousFileName | FolderPath |
+|---------------|----------|-----------------|------------|
+| 12/12/2025 14:18:38 | Sarah_Chen_Notes.exe | Sarah_Chen_Notes.exe.Txt | C:\Users\vmAdminUsername\Documents\PHTG\ |
+| 12/13/2025 10:14:41 | Sarah_Chen_Notes.exe | Sarah_Chen_Notes.exe | C:\ProgramData\PHTG\HealthCloud\ |
+| 12/13/2025 10:16:22 | PHTG.exe | Sarah_Chen_Notes.exe | C:\ProgramData\PHTG\HealthCloud\ |
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+the FileRenamed events for the payload, with 
+Sarah_Chen_Notes.exe as the first executable-extension 
+filename in the rename chain>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Alert on FileRenamed events where the new extension 
+  is executable** — particularly when the previous 
+  extension was non-executable and the rename occurs 
+  in user-writable directories:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Alert — file renamed to executable extension
+DeviceFileEvents
+| where ActionType == "FileRenamed"
+| where FileName endswith ".exe" 
+    or FileName endswith ".dll"
+    or FileName endswith ".bat"
+    or FileName endswith ".ps1"
+| where PreviousFileName !endswith ".exe"
+    and PreviousFileName !endswith ".dll"
+    and PreviousFileName !endswith ".bat"
+    and PreviousFileName !endswith ".ps1"
+| where FolderPath !contains "Windows"
+| where FolderPath !contains "Program Files"
+| project TimeGenerated, DeviceName, FileName, 
+          PreviousFileName, FolderPath,
+          InitiatingProcessAccountName
+```
 
+- **Alert on double extension filenames** — files 
+  with patterns like `*.exe.txt`, `*.exe.pdf`, 
+  `*.exe.doc` should trigger an immediate 
+  investigation:
+
+```kql
+// Alert — double extension file detection
+DeviceFileEvents
+| where FileName matches regex @"\.exe\.(txt|pdf|doc|docx|jpg|png)$"
+| project TimeGenerated, DeviceName, FileName, 
+          FolderPath, InitiatingProcessAccountName
+```
+
+- **Enable Windows Explorer to show file extensions** 
+  via Group Policy across all PHTG endpoints — this 
+  eliminates the visual deception of double extension 
+  attacks for end users
+- **Switch Microsoft Defender from passive mode to 
+  active mode** — Defender detected this payload 
+  within seconds of the rename event but failed 
+  to block it due to passive mode operation. 
+  Active mode would have quarantined the file 
+  before it could be executed
 </details>
 
 ---
