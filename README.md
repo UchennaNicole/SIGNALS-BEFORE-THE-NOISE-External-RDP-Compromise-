@@ -255,7 +255,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1078.003 | Valid Accounts: Local Accounts | Defense Evasion | 🔴 Critical | 
 | T1059.001 | Command and Scripting: PowerShell | Execution | 🟠 High |
 | T1112 | Modify Registry | Defense Evasion | 🟠 High |
-| 32 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 32 | | T1204.002 | User Execution: Malicious File | Execution | 🔴 Critical |
+| T1204 | User Execution | Execution | 🔴 Critical |
+| T1059.003 | Command and Scripting: Windows Command Shell | Execution | 🔴 Critical |
+| T1036.005 | Masquerading: Match Legitimate Name or Location | Defense Evasion | 🔴 Critical |
+| T1105 | Ingress Tool Transfer | Command and Control | 🔴 Critical |
 | 33 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 34 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 35 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -4918,34 +4922,188 @@ DeviceEvents
 <summary id="-flag-32">🚩 <strong>Flag 32: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify the filename under which the Meterpreter payload 
+executed during the first phase of its execution lifecycle 
+on `azwks-phtg-02` — distinguishing between the two 
+distinct execution phases observed in `DeviceProcessEvents` 
+telemetry and confirming how the payload was initially 
+launched by the threat actor.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `Sarah_Chen_Notes.exe`**
+
+During the first execution phase on **12 December 2025**, 
+the Meterpreter payload ran under the filename 
+**`Sarah_Chen_Notes.exe`**. The payload was executed 
+directly by `explorer.exe` — indicating the threat 
+actor double-clicked the file during their interactive 
+RDP session. This occurred three times in rapid 
+succession, consistent with the three Defender 
+passive mode detection events observed between 
+14:18 and 14:22 UTC.
+
+**Two-Phase Execution Summary:**
+
+| Phase | Date | Filename | Initiating Process | Method |
+|-------|------|----------|-------------------|--------|
+| Phase 1 | 12/12/2025 | Sarah_Chen_Notes.exe | explorer.exe | Manual double-click |
+| Phase 2 | 12/13/2025 | PHTG.exe | cmd.exe | Launch.bat persistence |
 
 ### 🔍 Evidence
-
 | Field | Value |
-|------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+|-------|-------|
+| Host | azwks-phtg-02 |
+| Phase 1 Filename | Sarah_Chen_Notes.exe |
+| Phase 1 Location | C:\Users\vmAdminUsername\Documents\PHTG\ |
+| Phase 1 Executions | 3 |
+| Phase 1 Timestamps | 12/12/2025 14:18:51, 14:20:37, 14:22:11 UTC |
+| Initiating Process | explorer.exe |
+| SHA256 | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 |
+| Malware Family | Trojan:Win32/Meterpreter.RPZ!MTB |
+| Account | vmadminusername |
+| Timestamp | 12/12/2025 14:18:51 – 14:22:11 UTC |
+| Process | Sarah_Chen_Notes.exe |
+| Parent Process | explorer.exe |
+| Command Line | "Sarah_Chen_Notes.exe" |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The identification of `Sarah_Chen_Notes.exe` as the Phase 1 
+execution filename reveals critical details about the threat 
+actor's operational behaviour and the attack progression:
+
+- **Phase 1 was manual, interactive execution** — All 
+  three Phase 1 executions were initiated by `explorer.exe`, 
+  which is the signature of a user double-clicking a file 
+  in Windows Explorer during an interactive desktop session. 
+  This confirms the threat actor was hands-on-keyboard 
+  during the initial payload activation
+- **Three executions in four minutes indicates 
+  persistence through failure** — The C2 callbacks 
+  to `173.244.55.130:4444` all failed (as confirmed 
+  in `DeviceNetworkEvents`). The threat actor attempted 
+  to launch the payload three times, likely because 
+  each execution failed to establish a Meterpreter 
+  session due to the C2 listener not being ready 
+  or network connectivity issues
+- **The filename itself is a social engineering 
+  artefact** — `Sarah_Chen_Notes.exe` references 
+  the Cloud Engineer whose LinkedIn post triggered 
+  the investigation. The attacker crafted a filename 
+  designed to appear legitimate in the context of 
+  the PHTG environment
+- **Phase 1 execution triggered immediate Defender 
+  detection** — Each execution was detected within 
+  seconds as `Trojan:Win32/Meterpreter.RPZ!MTB`, 
+  but Defender's passive mode prevented blocking
+- **Phase 1 failure drove Phase 2 persistence 
+  design** — The failed C2 callbacks in Phase 1 
+  led the threat actor to redesign their approach 
+  for Phase 2 — renaming the payload to `PHTG.exe`, 
+  relocating it to the HealthCloud directory, and 
+  creating `Launch.bat` for automated re-execution 
+  rather than relying on manual double-clicking
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Process execution events for the payload
+// Using SHA256 as the immutable identifier
+DeviceProcessEvents
+| where DeviceName == "azwks-phtg-02"
+| where SHA256 == "224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695"
+    or FileName in ("Sarah_Chen_Notes.exe", "PHTG.exe")
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| project TimeGenerated, FileName, ProcessCommandLine, 
+          InitiatingProcessFileName, 
+          InitiatingProcessCommandLine,
+          InitiatingProcessAccountName
+| order by TimeGenerated asc
+```
+
+**Results — Both Execution Phases:**
+| TimeGenerated | FileName | InitiatingProcessFileName | InitiatingProcessCommandLine |
+|---------------|----------|--------------------------|------------------------------|
+| 12/12/2025 14:18:51 | **Sarah_Chen_Notes.exe** | explorer.exe | Explorer.EXE |
+| 12/12/2025 14:20:37 | **Sarah_Chen_Notes.exe** | explorer.exe | Explorer.EXE |
+| 12/12/2025 14:22:11 | **Sarah_Chen_Notes.exe** | explorer.exe | Explorer.EXE |
+| 12/13/2025 10:13:18 | **Sarah_Chen_Notes.exe** | explorer.exe | Explorer.EXE |
+| 12/13/2025 10:21:48 | PHTG.exe | cmd.exe | cmd.exe /c "C:\ProgramData\PHTG\HealthCloud\Launch.bat" |
+| 12/13/2025 10:22:36 | PHTG.exe | cmd.exe | cmd.exe /c "C:\ProgramData\PHTG\HealthCloud\Launch.bat" |
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+Sarah_Chen_Notes.exe executed by explorer.exe on 12/12/2025 
+across three execution attempts, compared to PHTG.exe 
+launched by cmd.exe via Launch.bat on 12/13/2025>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Alert on executable files launched from 
+  user document directories by `explorer.exe`** — 
+  legitimate applications are rarely launched 
+  directly from `Documents` folders:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Alert — executable launched from user documents
+DeviceProcessEvents
+| where InitiatingProcessFileName =~ "explorer.exe"
+| where FileName endswith ".exe"
+| where FolderPath contains "\\Documents\\"
+| where TimeGenerated > ago(24h)
+| project TimeGenerated, DeviceName, FileName, 
+          ProcessCommandLine, FolderPath,
+          InitiatingProcessAccountName
+```
+
+- **Alert on rapid successive executions of the 
+  same filename** — three executions of the same 
+  binary within four minutes is anomalous and 
+  may indicate C2 establishment failures:
+
+```kql
+// Alert — rapid repeated execution of same binary
+DeviceProcessEvents
+| where TimeGenerated > ago(1h)
+| summarize 
+    ExecutionCount = count(),
+    FirstExec = min(TimeGenerated),
+    LastExec = max(TimeGenerated)
+    by DeviceName, FileName, SHA256
+| where ExecutionCount >= 3
+| extend WindowMinutes = datetime_diff(
+    'minute', LastExec, FirstExec)
+| where WindowMinutes <= 10
+| project DeviceName, FileName, SHA256, 
+          ExecutionCount, WindowMinutes,
+          FirstExec, LastExec
+```
+
+- **Correlate failed C2 callbacks with repeated 
+  payload executions** — if `DeviceNetworkEvents` 
+  shows repeated `ConnectionFailed` events from 
+  the same process SHA256 coinciding with multiple 
+  process executions in `DeviceProcessEvents`, 
+  this is a high-fidelity indicator of an attacker 
+  attempting to establish a C2 session:
+
+```kql
+// Correlation — failed C2 callbacks and payload 
+// execution attempts
+let PayloadExecs = DeviceProcessEvents
+    | where SHA256 == "224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695"
+    | project ExecTime = TimeGenerated, 
+              DeviceName, FileName;
+let FailedC2 = DeviceNetworkEvents
+    | where InitiatingProcessSHA256 == 
+        "224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695"
+    | where ActionType == "ConnectionFailed"
+    | project NetTime = TimeGenerated, 
+              DeviceName, RemoteIP, RemotePort;
+PayloadExecs
+| join kind=inner FailedC2 on DeviceName
+| where NetTime between (ExecTime .. (ExecTime + 2m))
+| project ExecTime, NetTime, DeviceName, 
+          FileName, RemoteIP, RemotePort
+```
 
 </details>
 
