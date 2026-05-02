@@ -234,7 +234,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1027 | Obfuscated Files or Information | Defense Evasion | 🟠 High |
 | T1105 | Ingress Tool Transfer | Command and Control | 🔴 Critical |
 | T1204.002 | User Execution: Malicious File | Execution | 🔴 Critical |
-| 28 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 28 | | T1036.007 | Masquerading: Double File Extension | Defense Evasion | 🔴 Critical |
+| T1036 | Masquerading | Defense Evasion | 🔴 Critical |
+| T1105 | Ingress Tool Transfer | Command and Control | 🔴 Critical |
+| T1027 | Obfuscated Files or Information | Defense Evasion | 🟠 High |
+| T1588.001 | Obtain Capabilities: Malware | Resource Development | 🟠 High |
 | 29 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 30 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 31 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -4056,34 +4060,178 @@ DeviceFileEvents
 <summary id="-flag-28">🚩 <strong>Flag 28: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify the SHA256 hash of the payload file to establish a 
+definitive, immutable identifier that persists across all 
+rename events, directory relocations, and filename changes — 
+confirming it is the same binary throughout the entire 
+delivery and execution chain, and enabling threat intelligence 
+correlation independent of filename.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695`**
+
+The SHA256 hash of the payload file is consistent across 
+all three `FileRenamed` events — confirming that 
+`Sarah_Chen_Notes.exe.Txt`, `Sarah_Chen_Notes.exe`, and 
+`PHTG.exe` are all the same binary. The filename changed 
+three times; the hash never changed once.
+
+| Timestamp | FileName | SHA256 |
+|-----------|----------|--------|
+| 12/12/2025 14:18:38 | Sarah_Chen_Notes.exe | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 |
+| 12/13/2025 10:14:41 | Sarah_Chen_Notes.exe | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 |
+| 12/13/2025 10:16:22 | PHTG.exe | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 |
 
 ### 🔍 Evidence
-
 | Field | Value |
-|------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+|-------|-------|
+| Host | azwks-phtg-02 |
+| SHA256 | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 |
+| Malware Family | Trojan:Win32/Meterpreter.RPZ!MTB |
+| Filename 1 | Sarah_Chen_Notes.exe.Txt (delivery) |
+| Filename 2 | Sarah_Chen_Notes.exe (activation) |
+| Filename 3 | PHTG.exe (persistence) |
+| Initial Location | C:\Users\vmAdminUsername\Documents\PHTG\ |
+| Final Location | C:\ProgramData\PHTG\HealthCloud\ |
+| First Seen | 12/12/2025 14:18:38 UTC |
+| Defender Detection | Trojan:Win32/Meterpreter.RPZ!MTB |
+| Defender Mode | Passive (detected but did not block) |
+| Account | vmadminusername |
+| Timestamp | 12/12/2025 – 12/13/2025 |
+| Process | N/A — File telemetry |
+| Parent Process | N/A — File telemetry |
+| Command Line | N/A — File telemetry |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The SHA256 hash is the most reliable identifier in this 
+investigation for several critical reasons:
+
+- **Hashes are immutable — filenames are not** — The 
+  threat actor changed the filename three times across 
+  two days to evade detection and blend the payload 
+  into legitimate infrastructure. The SHA256 remained 
+  constant throughout, providing an unchangeable 
+  anchor for investigation and attribution
+- **Enables cross-platform threat intelligence 
+  correlation** — The hash can be used to:
+  - Search internal telemetry across the entire 
+    PHTG estate for other devices that may have 
+    encountered this payload
+  - Query threat intelligence platforms for 
+    prior sightings, campaign attribution, and 
+    additional IOCs associated with this sample
+  - Submit to internal sandboxing environments 
+    for behavioural analysis
+- **Confirms single payload hypothesis** — The 
+  consistent SHA256 across all three rename events 
+  definitively confirms that `Sarah_Chen_Notes.exe.Txt`, 
+  `Sarah_Chen_Notes.exe`, and `PHTG.exe` are the 
+  same Meterpreter binary. This eliminates any 
+  possibility that the threat actor introduced 
+  a different payload at any stage of the chain
+- **Enables proactive hunting across the estate** — 
+  The hash can immediately be used to hunt for 
+  this specific Meterpreter sample on any other 
+  PHTG endpoint, identifying lateral movement 
+  or additional deployments of the same payload
+- **Provides a permanent IOC for blocklisting** — 
+  Unlike IPs and domain names, which can change, 
+  a SHA256 hash is a permanent, exact identifier 
+  that can be added to EDR blocklists to prevent 
+  future execution of this exact binary
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Retrieve SHA256 across all payload rename events
+DeviceFileEvents
+| where DeviceName == "azwks-phtg-02"
+| where FileName in ("Sarah_Chen_Notes.exe", "PHTG.exe")
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where SHA256 != ""
+| project TimeGenerated, FileName, SHA256, 
+          FolderPath, ActionType
+| order by TimeGenerated asc
+```
+
+**Results:**
+| TimeGenerated | FileName | SHA256 | ActionType |
+|---------------|----------|--------|------------|
+| 12/12/2025 14:18:38 | Sarah_Chen_Notes.exe | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 | FileRenamed |
+| 12/13/2025 10:14:41 | Sarah_Chen_Notes.exe | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 | FileRenamed |
+| 12/13/2025 10:16:22 | PHTG.exe | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 | FileRenamed |
+
+```kql
+// Hunt for this hash across the entire PHTG estate
+// to identify lateral movement or additional deployments
+DeviceFileEvents
+| where SHA256 == "224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| summarize count() by DeviceName, FileName, FolderPath
+| order by count_ desc
+```
+
+```kql
+// Cross-reference hash with process execution events
+DeviceProcessEvents
+| where SHA256 == "224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| project TimeGenerated, DeviceName, FileName, 
+          ProcessCommandLine, InitiatingProcessFileName,
+          InitiatingProcessAccountName
+| order by TimeGenerated asc
+```
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+the consistent SHA256 hash 
+224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 
+across all three FileRenamed events for the payload>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Add the SHA256 to your EDR blocklist immediately** — 
+  this prevents future execution of this exact binary 
+  on any PHTG endpoint:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Verify no other devices have encountered this hash
+DeviceFileEvents
+| where SHA256 == "224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695"
+| summarize 
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated),
+    FileNames = make_set(FileName),
+    Locations = make_set(FolderPath)
+    by DeviceName
+```
+
+- **Create a SHA256-based custom detection rule** in 
+  Microsoft Defender for Endpoint to alert on any 
+  future file creation or process execution 
+  matching this hash:
+
+```kql
+// Alert — known malicious hash detected
+DeviceFileEvents
+| where SHA256 == "224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695"
+| where TimeGenerated > ago(1h)
+| project TimeGenerated, DeviceName, FileName, 
+          FolderPath, ActionType,
+          InitiatingProcessAccountName
+```
+
+- **Prioritise hash-based detection over filename-based 
+  detection** — this investigation demonstrates that 
+  a single payload can cycle through multiple filenames 
+  (`Sarah_Chen_Notes.exe.Txt` → `Sarah_Chen_Notes.exe` 
+  → `PHTG.exe`) while maintaining an identical SHA256. 
+  Hash-based detection is immune to these renaming 
+  techniques
+- **Submit the hash to internal sandboxing** for 
+  full behavioural analysis — confirm C2 configuration, 
+  persistence mechanisms, and any additional 
+  capabilities beyond the Meterpreter baseline 
+  observed in this investigation
 
 </details>
 
