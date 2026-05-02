@@ -229,7 +229,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1027 | Obfuscated Files or Information | Defense Evasion | 🟠 High |
 | T1204.002 | User Execution: Malicious File | Execution | 🔴 Critical |
 | T1105 | Ingress Tool Transfer | Command and Control | 🔴 Critical |
-| 27 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 27 | | T1036.007 | Masquerading: Double File Extension | Defense Evasion | 🔴 Critical |
+| T1036 | Masquerading | Defense Evasion | 🔴 Critical |
+| T1027 | Obfuscated Files or Information | Defense Evasion | 🟠 High |
+| T1105 | Ingress Tool Transfer | Command and Control | 🔴 Critical |
+| T1204.002 | User Execution: Malicious File | Execution | 🔴 Critical |
 | 28 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 29 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 30 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -3873,35 +3877,177 @@ DeviceFileEvents
 <summary id="-flag-27">🚩 <strong>Flag 27: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify the intermediate filename used during the payload's 
+delivery chain — the filename that existed between the file's 
+initial arrival on the system and its activation as a Windows 
+executable. This double extension filename represents the 
+attacker's primary delivery obfuscation technique, designed 
+to disguise an executable payload as a benign text file.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `Sarah_Chen_Notes.exe.Txt`**
+
+The payload arrived on `azwks-phtg-02` with the double 
+extension filename **`Sarah_Chen_Notes.exe.Txt`** — a 
+deliberate masquerading technique that exploits Windows' 
+default behaviour of hiding known file extensions. With 
+default Explorer settings, this file would appear to any 
+casual observer as `Sarah_Chen_Notes.exe` — apparently 
+an executable — while actually being treated by the OS 
+as a `.Txt` file, preventing immediate execution.
+
+**Full Delivery Chain:**
+```
+[DELIVERY]
+Sarah_Chen_Notes.exe.Txt    ← Arrived with double extension
+        ↓                      (disguised — cannot execute)
+[ACTIVATION — 12/12/2025 14:18:38 UTC]
+Sarah_Chen_Notes.exe        ← Renamed to true executable ✅
+        ↓
+[RELOCATION — 12/13/2025 10:14:41 UTC]
+Sarah_Chen_Notes.exe        ← Moved to HealthCloud directory
+        ↓
+[FINAL RENAME — 12/13/2025 10:16:22 UTC]
+PHTG.exe                    ← Blends with legitimate service
+```
 
 ### 🔍 Evidence
-
 | Field | Value |
-|------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+|-------|-------|
+| Host | azwks-phtg-02 |
+| Double Extension Filename | Sarah_Chen_Notes.exe.Txt |
+| True File Type | Windows PE Executable (Meterpreter) |
+| Apparent File Type | Text file (.Txt) |
+| Delivery Location | C:\Users\vmAdminUsername\Documents\PHTG\ |
+| Renamed To | Sarah_Chen_Notes.exe |
+| Rename Timestamp | 12/12/2025 14:18:38 UTC |
+| SHA256 | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 |
+| Malware Family | Trojan:Win32/Meterpreter.RPZ!MTB |
+| Account | vmadminusername |
+| Timestamp | 12/12/2025 (pre 14:18:38 UTC) |
+| Process | N/A — File delivery phase |
+| Parent Process | N/A — File delivery phase |
+| Command Line | N/A — File delivery phase |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The double extension filename `Sarah_Chen_Notes.exe.Txt` 
+is a sophisticated delivery technique with multiple 
+operational benefits for the attacker:
+
+- **Exploits Windows default extension hiding** — 
+  Windows hides known file extensions by default. 
+  A user viewing this file in Explorer with default 
+  settings would see `Sarah_Chen_Notes.exe` — 
+  making the `.Txt` outer extension invisible and 
+  creating a false impression the file is already 
+  an executable, or alternatively just a text file 
+  depending on icon association
+- **Prevents premature execution** — While disguised 
+  as `.Txt`, the file cannot be accidentally double-clicked 
+  and executed. The attacker maintains control over 
+  exactly when the payload activates by performing 
+  the rename themselves during their interactive session
+- **May bypass extension-based AV scanning** — Some 
+  security tools and email filters scan files based 
+  on their declared extension. A file ending in `.Txt` 
+  may receive less scrutiny than one ending in `.exe`, 
+  potentially allowing the payload to reach the 
+  filesystem undetected
+- **Social engineering via filename** — The reference 
+  to Sarah Chen in the filename is deliberate. If 
+  any PHTG administrator reviewed the file system, 
+  a file named `Sarah_Chen_Notes.exe.Txt` in a 
+  PHTG documents folder might appear to be a 
+  legitimate note file left by a colleague
+- **The SHA256 proves content integrity throughout** — 
+  The hash `224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695` 
+  is consistent from delivery through all rename 
+  events — confirming the double extension was 
+  purely a naming technique and the binary content 
+  of the Meterpreter payload was never modified
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Track payload through FileRenamed events to identify 
+// the double extension filename
+DeviceFileEvents
+| where DeviceName == "azwks-phtg-02"
+| where ActionType == "FileRenamed"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where SHA256 == "224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695"
+    or FileName contains "Sarah_Chen_Notes"
+    or PreviousFileName contains "Sarah_Chen_Notes"
+| project TimeGenerated, FileName, PreviousFileName, 
+          FolderPath, SHA256, InitiatingProcessAccountName
+| order by TimeGenerated asc
+```
+
+**Results — Full Rename Chain:**
+| TimeGenerated | FileName | PreviousFileName |
+|---------------|----------|-----------------|
+| 12/12/2025 14:18:38 | Sarah_Chen_Notes.exe | **Sarah_Chen_Notes.exe.Txt** |
+| 12/13/2025 10:14:41 | Sarah_Chen_Notes.exe | Sarah_Chen_Notes.exe |
+| 12/13/2025 10:16:22 | PHTG.exe | Sarah_Chen_Notes.exe |
+
+> The double extension filename `Sarah_Chen_Notes.exe.Txt` 
+> is captured in the `PreviousFileName` field of the first 
+> `FileRenamed` event — confirming it was the filename 
+> used immediately before the payload was activated as 
+> a Windows executable.
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+the FileRenamed event with PreviousFileName of 
+Sarah_Chen_Notes.exe.Txt being renamed to 
+Sarah_Chen_Notes.exe at 12/12/2025 14:18:38 UTC>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Alert on files with double extensions matching 
+  the pattern `*.exe.*` or `*.dll.*`** across all 
+  endpoint file systems:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Alert — double extension file detection
+DeviceFileEvents
+| where ActionType in ("FileCreated", "FileRenamed")
+| where FileName matches regex @"\.(exe|dll|bat|ps1|cmd)\.(txt|pdf|doc|docx|jpg|png|zip)$"
+| where TimeGenerated > ago(24h)
+| project TimeGenerated, DeviceName, FileName, 
+          FolderPath, InitiatingProcessAccountName,
+          ActionType
+```
 
+- **Enforce Group Policy to show all file extensions** — 
+  disable the Windows default of hiding known file 
+  extensions across all PHTG endpoints. This eliminates 
+  the visual deception component of double extension 
+  attacks:
+  - GPO Path: `User Configuration → Administrative 
+    Templates → Windows Components → File Explorer`
+  - Setting: `Hide extensions for known file types` 
+    → **Disabled**
+
+- **Alert on files delivered via RDP clipboard or 
+  file transfer that contain executable headers 
+  but non-executable extensions** — content 
+  inspection (magic bytes analysis) rather than 
+  extension-based classification would have 
+  detected this payload as a PE executable 
+  regardless of its `.Txt` extension
+
+- **Switch Defender from passive to active mode** — 
+  the payload was detected within seconds of the 
+  rename event. Active mode would have quarantined 
+  `Sarah_Chen_Notes.exe` before it could be 
+  executed, breaking the attack chain at this 
+  critical stage
+
+- **Monitor `PreviousFileName` in FileRenamed 
+  events** — the double extension is preserved 
+  in `PreviousFileName` after the rename, making 
+  it detectable in retrospective telemetry even 
+  if the file is no longer present on the system
 </details>
 
 ---
