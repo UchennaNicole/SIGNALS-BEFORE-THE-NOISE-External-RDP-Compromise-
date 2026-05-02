@@ -175,7 +175,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1090.003 | Proxy: Multi-hop Proxy | Defense Evasion | 🟠 High |
 | T1583.003 | Acquire Infrastructure: Virtual Private Server | Resource Development | 🟠 High |
 | T1078 | Valid Accounts | Initial Access | 🔴 Critical |
-| 17 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 17 | | T1078 | Valid Accounts | Defense Evasion / Initial Access | 🔴 Critical |
+| T1078.003 | Valid Accounts: Local Accounts | Initial Access | 🔴 Critical |
+| T1133 | External Remote Services | Initial Access | 🔴 Critical |
+| T1021.001 | Remote Services: Remote Desktop Protocol | Lateral Movement | 🔴 Critical |
+| T1090.003 | Proxy: Multi-hop Proxy | Defense Evasion | 🟠 High |
 | 18 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 19 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 20 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -2216,34 +2220,165 @@ DeviceLogonEvents
 <summary id="-flag-17">🚩 <strong>Flag 17: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Determine how many of the 17 countries associated with RDP-related 
+authentication activity recorded at least one successful logon event 
+against `azwks-phtg-02`. This narrows the geographic investigation 
+from all authentication activity to confirmed successful access, 
+identifying which countries represent confirmed compromise origins 
+rather than unsuccessful attack attempts.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: 2**
+
+Of the 17 countries associated with RDP-related authentication 
+activity, only **2 countries** recorded at least one successful 
+authentication event:
+
+| Country | Successful Auth Events |
+|---------|----------------------|
+| Uruguay | 23 |
+| United States | 6 |
+| **Total** | **29** |
+
+The remaining 15 countries were associated exclusively with failed 
+authentication attempts — consistent with opportunistic scanning 
+and credential stuffing infrastructure that did not possess valid 
+credentials for `vmadminusername`.
 
 ### 🔍 Evidence
-
 | Field | Value |
 |------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+| Host | azwks-phtg-02 |
+| Total Countries in Auth Telemetry | 17 |
+| Countries with Successful Auth | 2 |
+| Countries with Failed Auth Only | 15 |
+| Successful Auth — Uruguay | 23 events |
+| Successful Auth — United States | 6 events |
+| Total Successful Auth Events | 29 |
+| Investigation Window | 09 December – 23 December 2025 UTC |
+| Timestamp | 09 December 2025 – 23 December 2025 UTC |
+| Process | N/A — Authentication telemetry, no process execution |
+| Parent Process | N/A — Authentication telemetry, no process execution |
+| Command Line | N/A — Authentication telemetry, no process execution |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The reduction from 17 countries to 2 countries with successful 
+authentications is one of the most significant findings in this 
+investigation:
+
+- **It isolates the confirmed threat actor infrastructure** — 
+  while 17 countries contributed to the broader brute force 
+  campaign, only Uruguay and the United States possessed 
+  valid credentials for `vmadminusername`. This strongly 
+  suggests these two source regions represent the actual 
+  threat actor's infrastructure rather than opportunistic 
+  scanning noise
+- **Uruguay is immediately anomalous** — PHTG operates 
+  exclusively in the United States. Uruguay has no legitimate 
+  business justification for accessing PHTG infrastructure, 
+  making its 23 successful authentications a confirmed 
+  indicator of compromise
+- **United States (6 events) requires further investigation** — 
+  US-based successful authentications could represent legitimate 
+  access or could indicate the threat actor is also routing 
+  traffic through US-based infrastructure (VPN, cloud VPS, 
+  residential proxy) to blend in with expected traffic
+- **The 15 countries with only failures** represent the 
+  background noise of the internet-wide RDP scanning 
+  ecosystem — they should be documented but are not 
+  the primary investigation focus
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Countries with at least one successful RDP authentication
+let GeoTable =
+    externaldata(network:string, geoname_id:long, continent_code:string, 
+                 continent_name:string, country_iso_code:string, country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| where ActionType == "LogonSuccess"
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| summarize dcount(country_name)
+```
+
+**Result: 2 countries**
+
+```kql
+// Full breakdown of successful auth events by country
+let GeoTable =
+    externaldata(network:string, geoname_id:long, continent_code:string, 
+                 continent_name:string, country_iso_code:string, country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| where ActionType == "LogonSuccess"
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| summarize count() by country_name
+| order by count_ desc
+```
+
+**Results:**
+| Country | Count |
+|---------|-------|
+| Uruguay | 23 |
+| United States | 6 |
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+the 2 countries with successful RDP authentication events — 
+Uruguay (23) and United States (6)>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Treat any successful RDP authentication from Uruguay 
+  as a confirmed incident** — PHTG has no legitimate 
+  business presence in Uruguay, making every one of the 
+  23 successful authentications an unambiguous indicator 
+  of compromise
+- **Investigate the 6 US-based successful authentications** — 
+  correlate the source IPs against known VPN providers, 
+  cloud hosting ranges (AWS, Azure, GCP), and residential 
+  proxy networks to determine if they represent legitimate 
+  or malicious access:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Investigate US-based successful authentications
+let GeoTable =
+    externaldata(network:string, geoname_id:long, continent_code:string, 
+                 continent_name:string, country_iso_code:string, country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| where ActionType == "LogonSuccess"
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| where country_iso_code == "US"
+| project TimeGenerated, RemoteIP, AccountName, 
+          LogonType, country_name
+| order by TimeGenerated asc
+```
+
+- **Build a successful authentication watchlist** — any 
+  `LogonSuccess` event from a country outside PHTG's 
+  operating region should be automatically escalated 
+  to a P1 incident with immediate response actions:
+  1. Isolate the affected endpoint
+  2. Reset all credentials on the device
+  3. Review all process and file activity from the 
+     time of the first successful authentication
+  4. Check for lateral movement to other internal systems
 
 </details>
 
