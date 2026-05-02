@@ -209,7 +209,12 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1133 | External Remote Services | Initial Access | 🔴 Critical |
 | T1021.001 | Remote Services: Remote Desktop Protocol | Lateral Movement | 🔴 Critical |
 | T1583.003 | Acquire Infrastructure: Virtual Private Server | Resource Development | 
-| 23 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 23 | | T1078.003 | Valid Accounts: Local Accounts | Initial Access | 🔴 Critical |
+| T1078 | Valid Accounts | Defense Evasion / Persistence | 🔴 Critical |
+| T1021.001 | Remote Services: Remote Desktop Protocol | Lateral Movement | 🔴 Critical |
+| T1583.003 | Acquire Infrastructure: Virtual Private Server | Resource Development | 🟠 High |
+| T1090 | Proxy | Defense Evasion | 🟠 High |
+| T1008 | Fallback Channels | Command and Control | 🟠 High |
 | 24 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 25 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 26 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -3194,35 +3199,156 @@ DeviceProcessEvents
 <summary id="-flag-23">🚩 <strong>Flag 23: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify the second source IP address associated with successful 
+RDP authentication events from Uruguay to complete the threat actor 
+infrastructure picture and confirm whether a single IP or multiple 
+IPs within the same infrastructure block were used to maintain 
+persistent access to `azwks-phtg-02`.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `173.244.55.128`**
+
+The second Uruguayan source IP associated with successful RDP 
+authentication events is **`173.244.55.128`**, accounting for 
+**10 of the 23 total successful Uruguay authentications**. 
+Combined with `173.244.55.131` (13 events), both IPs belong 
+to the `173.244.55.0/24` subnet — the same block as the 
+Meterpreter C2 callback IP `173.244.55.130`.
+
+| Source IP | Successful Auth Events | Role in Attack Chain |
+|-----------|----------------------|---------------------|
+| 173.244.55.131 | 13 | Primary access IP — first seen 12/12/2025 |
+| 173.244.55.128 | 10 | Secondary access IP |
+| 173.244.55.130 | N/A | C2 callback IP (DeviceNetworkEvents) |
 
 ### 🔍 Evidence
-
 | Field | Value |
-|------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+|-------|-------|
+| Host | azwks-phtg-02 |
+| Second Uruguay IP | 173.244.55.128 |
+| Successful Auth Events | 10 |
+| Account Used | vmadminusername |
+| Country | Uruguay |
+| Subnet | 173.244.55.0/24 |
+| Related IPs in Subnet | 173.244.55.131 (access), 173.244.55.130 (C2) |
+| Investigation Window | 09 December – 23 December 2025 UTC |
+| Timestamp | 09 December 2025 – 23 December 2025 UTC |
+| Process | N/A — Authentication telemetry, no process execution |
+| Parent Process | N/A — Authentication telemetry, no process execution |
+| Command Line | N/A — Authentication telemetry, no process execution |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The identification of a second Uruguayan IP within the same 
+/24 subnet is a pivotal infrastructure finding:
+
+- **Subnet convergence across three attack phases confirms 
+  single threat actor attribution:**
+  - `173.244.55.128` — Successful RDP authentication (access)
+  - `173.244.55.130` — Meterpreter C2 callback (post-exploitation)
+  - `173.244.55.131` — Successful RDP authentication (access)
+  
+  Three IPs from the same /24 subnet performing three 
+  distinct attack functions is not coincidental — it 
+  confirms a single, organised threat actor operating 
+  from a dedicated infrastructure block in Uruguay
+
+- **Use of multiple IPs within the same subnet suggests 
+  deliberate operational security** — the threat actor 
+  rotated between two adjacent IPs for RDP access, 
+  possibly to:
+  - Evade per-IP threshold-based detection rules
+  - Maintain access redundancy in case one IP was blocked
+  - Separate authentication sessions by IP for 
+    operational organisation
+
+- **The entire `173.244.55.0/24` subnet should be 
+  treated as hostile** — with three confirmed malicious 
+  IPs in this block, the entire /24 should be 
+  immediately blocklisted across all PHTG network 
+  perimeter controls
+
+- **This completes the threat actor infrastructure 
+  picture** — combined with `173.244.55.131` and 
+  `173.244.55.130`, the full attack infrastructure 
+  is now mapped:
+  - Initial access: `173.244.55.131`
+  - Persistent access: `173.244.55.128`
+  - C2 callbacks: `173.244.55.130`
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Identify second Uruguay source IP — excluding first IP
+let GeoTable =
+    externaldata(network:string, geoname_id:long, continent_code:string, 
+                 continent_name:string, country_iso_code:string, country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| where ActionType == "LogonSuccess"
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| where country_name == "Uruguay"
+| where RemoteIP != "173.244.55.131"
+| summarize count() by RemoteIP
+```
+
+**Result:**
+| RemoteIP | count_ |
+|----------|--------|
+| 173.244.55.128 | 10 |
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+173.244.55.128 as the second Uruguay source IP with 10 
+successful RDP authentication events>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Block the entire `173.244.55.0/24` subnet** at all 
+  network perimeter controls immediately — three confirmed 
+  malicious IPs in a single /24 justify blocking the 
+  entire range:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Verify no legitimate traffic to/from 173.244.55.0/24
+// before implementing subnet block
+DeviceNetworkEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where RemoteIP startswith "173.244.55."
+| summarize count() by RemoteIP, ActionType
+| order by count_ desc
+```
 
+- **Implement subnet-level threat intelligence rules** — 
+  when multiple IPs from the same /24 are confirmed 
+  malicious, automatically flag the entire subnet for 
+  blocking and investigation in your threat intelligence 
+  platform
+- **Hunt for the same subnet across the broader PHTG 
+  estate** — check whether `173.244.55.0/24` has 
+  appeared in telemetry from any other PHTG devices:
+
+```kql
+// Hunt for 173.244.55.0/24 across all devices
+DeviceNetworkEvents
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where RemoteIP startswith "173.244.55."
+| summarize count() by DeviceName, RemoteIP, ActionType
+| order by count_ desc
+```
+
+- **Document the complete threat actor infrastructure 
+  picture** for this investigation:
+
+| IP Address | Role | First Seen |
+|------------|------|------------|
+| 173.244.55.128 | RDP Access (secondary) | 12/12/2025 |
+| 173.244.55.130 | Meterpreter C2 | 12/12/2025 |
+| 173.244.55.131 | RDP Access (primary) | 12/12/2025 |
 </details>
 
 ---
