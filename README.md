@@ -6521,6 +6521,7 @@ Despite 325 network scanning events, 675 authentication attempts,
 23 successful unauthorised logons, Meterpreter payload execution, 
 Defender passive mode detections, and C2 callback attempts — 
 no automated alert fired at any stage of this intrusion.
+
 ---
 
 ### Recommendations
