@@ -159,7 +159,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1078 | Valid Accounts | Defense Evasion / Initial Access | 🔴 Critical | 
 | T1133 | External Remote Services | Initial Access | 🔴 Critical |
 | T1021.001 | Remote Services: Remote Desktop Protocol | Lateral Movement | 🔴 Critical |
-| 14 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 14 | | T1110.001 | Brute Force: Password Guessing | Credential Access | 🔴 Critical |
+| T1110.003 | Brute Force: Password Spraying | Credential Access | 🔴 Critical |
+| T1110 | Brute Force | Credential Access | 🔴 Critical |
+| T1078 | Valid Accounts | Defense Evasion / Initial Access | 🔴 Critical |
+| T1133 | External Remote Services | Initial Access | 🔴 Critical |
 | 15 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 16 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 17 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -1739,26 +1743,104 @@ DeviceLogonEvents
 <summary id="-flag-14">🚩 <strong>Flag 14: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify the most frequently recorded authentication outcome across 
+all RDP-related logon activity on `azwks-phtg-02` to characterise 
+the dominant pattern of external credential-based attacks and 
+confirm the nature of the threat actor's approach.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `LogonFailed`**
+
+`LogonFailed` was the most frequently recorded authentication outcome, 
+accounting for **646 of the 675 total RDP-related external 
+authentication events** — representing **95.7%** of all external 
+RDP authentication activity. This overwhelming ratio of failures 
+to successes is the hallmark signature of an automated credential 
+stuffing or brute force campaign.
+
+| ActionType | Count | Percentage |
+|------------|-------|------------|
+| LogonFailed | 646 | 95.7% |
+| LogonSuccess | 29 | 4.3% |
+| **Total** | **675** | **100%** |
 
 ### 🔍 Evidence
 
 | Field | Value |
 |------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+| Host | azwks-phtg-02 |
+| Most Frequent ActionType | LogonFailed |
+| LogonFailed Count | 646 |
+| LogonSuccess Count | 29 |
+| Failure Rate | 95.7% |
+| Success Rate | 4.3% |
+| Investigation Window | 09 December – 23 December 2025 UTC |
+| Timestamp | 09 December 2025 – 23 December 2025 UTC |
+| Process | N/A — Authentication telemetry, no process execution |
+| Parent Process | N/A — Authentication telemetry, no process execution |
+| Command Line | N/A — Authentication telemetry, no process execution |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The dominance of `LogonFailed` events in the authentication 
+telemetry is significant for several reasons:
+
+- **Confirms automated brute force activity** — A 95.7% failure 
+  rate is consistent with automated tools cycling through 
+  credential lists at high speed. Human operators rarely 
+  generate this volume of failed attempts
+- **The 4.3% success rate is alarming** — Despite the high 
+  failure rate, the threat actor ultimately succeeded 29 times. 
+  This confirms the account `vmadminusername` used a weak, 
+  guessable, or previously breached password that appeared 
+  in the attacker's credential list
+- **Failure volume should have triggered alerts** — 646 failed 
+  authentication events over a 14-day window represents an 
+  average of 46 failures per day. Any properly tuned SIEM 
+  rule would have flagged this within hours of the campaign 
+  beginning
+- **The success events are the critical pivot point** — While 
+  `LogonFailed` dominates by volume, the `LogonSuccess` events 
+  are where the investigation must focus next — specifically 
+  identifying which accounts, source IPs, and timestamps 
+  are associated with the successful authentications
+
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Authentication outcome breakdown for RDP-related external logons
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| summarize count() by ActionType
+| order by count_ desc
+```
+
+**Results:**
+| ActionType | Count |
+|------------|-------|
+| LogonFailed | 646 |
+| LogonSuccess | 29 |
+
+```kql
+// Percentage breakdown
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| summarize Count = count() by ActionType
+| extend Percentage = round(Count * 100.0 / toscalar(
+    DeviceLogonEvents
+    | where DeviceName == "azwks-phtg-02"
+    | where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+    | where LogonType in ("RemoteInteractive", "Network")
+    | where RemoteIPType == "Public"
+    | count), 1)
+| order by Count desc
+```
+
 
 ### 🖼️ Screenshot
 <Insert screenshot>
@@ -1766,7 +1848,57 @@ DeviceLogonEvents
 ### 🛠️ Detection Recommendation
 
 **Hunting Tip:**  
-<Actionable guidance for defenders>
+- **Implement account lockout policies** — after a defined 
+  threshold of failed authentication attempts (typically 
+  5-10), the account should be automatically locked and 
+  an alert triggered. This would have interrupted the 
+  brute force campaign early
+- **Alert on failed authentication volume thresholds** — 
+  646 failures should never accumulate without triggering 
+  a detection:
+
+```kql
+// Alert — brute force threshold exceeded
+DeviceLogonEvents
+| where ActionType == "LogonFailed"
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| where TimeGenerated > ago(1h)
+| summarize 
+    FailureCount = count(),
+    UniqueAccounts = dcount(AccountName),
+    UniqueSourceIPs = dcount(RemoteIP)
+    by DeviceName, bin(TimeGenerated, 15m)
+| where FailureCount > 10
+```
+
+- **Use password spray detection logic** — if failures are 
+  spread across many accounts from the same IP, it is 
+  spraying; if concentrated on one account from many IPs, 
+  it is brute force. Both patterns warrant immediate 
+  investigation:
+
+```kql
+// Password spray vs brute force classification
+DeviceLogonEvents
+| where ActionType == "LogonFailed"
+| where RemoteIPType == "Public"
+| where TimeGenerated > ago(24h)
+| summarize 
+    UniqueAccounts = dcount(AccountName),
+    FailureCount = count()
+    by RemoteIP, DeviceName
+| extend 
+    AttackType = iff(UniqueAccounts > 5, 
+        "Password Spray", "Brute Force")
+| order by FailureCount desc
+```
+
+- **Deploy Microsoft Entra ID Password Protection** to 
+  block commonly used weak passwords — `vmadminusername` 
+  with a simple password would have been blocked by a 
+  custom banned password list containing predictable 
+  admin account names
 
 </details>
 
