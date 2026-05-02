@@ -239,7 +239,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1105 | Ingress Tool Transfer | Command and Control | 🔴 Critical |
 | T1027 | Obfuscated Files or Information | Defense Evasion | 🟠 High |
 | T1588.001 | Obtain Capabilities: Malware | Resource Development | 🟠 High |
-| 29 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 29 | | T1036.005 | Masquerading: Match Legitimate Name or Location | Defense Evasion | 🔴 Critical |
+| T1036 | Masquerading | Defense Evasion | 🔴 Critical |
+| T1543.003 | Create or Modify System Process: Windows Service | Persistence | 🔴 Critical |
+| T1574 | Hijack Execution Flow | Persistence / Defense Evasion | 🟠 High |
+| T1027 | Obfuscated Files or Information | Defense Evasion | 🟠 High |
 | 30 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 31 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 32 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -4241,34 +4245,194 @@ DeviceFileEvents
 <summary id="-flag-29">🚩 <strong>Flag 29: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Track the payload file forward through all `FileRenamed` events 
+using its SHA256 hash to identify the final filename assigned 
+to the binary — revealing the threat actor's ultimate naming 
+strategy for the payload and confirming how it was positioned 
+for persistence within the PHTG environment.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `PHTG.exe`**
+
+The final observed filename tied to SHA256 
+`224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695` 
+is **`PHTG.exe`** — renamed at **12/13/2025 10:16:22 UTC** 
+and located in `C:\ProgramData\PHTG\HealthCloud\`. The threat 
+actor deliberately chose this filename to blend the Meterpreter 
+payload with PHTG's legitimate HealthCloud service — a 
+calculated masquerading technique designed to make the 
+malicious binary appear as a legitimate component of the 
+recently deployed internal service.
+
+**Complete Rename Chain:**
+```
+Sarah_Chen_Notes.exe.Txt          ← Delivery (double extension)
+         ↓  [12/12/2025 14:18:38 UTC]
+Sarah_Chen_Notes.exe              ← Activation (executable)
+         ↓  [12/13/2025 10:14:41 UTC]
+Sarah_Chen_Notes.exe              ← Relocated to HealthCloud
+         ↓  [12/13/2025 10:16:22 UTC]
+PHTG.exe                          ← FINAL NAME ✅ (blends with service)
+```
 
 ### 🔍 Evidence
-
 | Field | Value |
-|------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+|-------|-------|
+| Host | azwks-phtg-02 |
+| Final Filename | PHTG.exe |
+| Previous Filename | Sarah_Chen_Notes.exe |
+| Final Rename Timestamp | 12/13/2025 10:16:22 UTC |
+| Final Location | C:\ProgramData\PHTG\HealthCloud\ |
+| SHA256 | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 |
+| Malware Family | Trojan:Win32/Meterpreter.RPZ!MTB |
+| Masquerading Target | PHTG HealthCloud legitimate service |
+| Account | vmadminusername |
+| Timestamp | 12/13/2025 10:16:22 UTC |
+| Process | N/A — File rename operation |
+| Parent Process | N/A — File rename operation |
+| Command Line | N/A — File rename operation |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The final rename to `PHTG.exe` within the HealthCloud 
+directory is one of the most strategically significant 
+actions taken by the threat actor:
+
+- **Deliberate masquerading as a legitimate service** — 
+  Renaming the payload to `PHTG.exe` and placing it 
+  in `C:\ProgramData\PHTG\HealthCloud\` was a 
+  calculated decision. HealthCloud was deployed 
+  just two days earlier (11 December 2025) and 
+  was already generating legitimate process 
+  activity, scheduled tasks, and diagnostic 
+  files in that directory. The Meterpreter 
+  payload was designed to hide within this 
+  known-good footprint
+- **The attacker weaponised PHTG's own 
+  infrastructure against itself** — By 
+  using the company's own abbreviation as 
+  the executable name and placing it in 
+  the company's own service directory, 
+  the threat actor made the payload 
+  extremely difficult to identify through 
+  casual file system review or alert triage
+- **Name and location together create a 
+  convincing disguise** — `PHTG.exe` in 
+  `C:\ProgramData\PHTG\HealthCloud\` would 
+  appear entirely legitimate to any analyst 
+  unfamiliar with the exact expected 
+  HealthCloud file inventory. Only a 
+  hash-based comparison or a precise 
+  file inventory baseline would reveal 
+  the payload
+- **The rename sequence tells the full 
+  operational story:**
+  1. Payload delivered disguised as text
+  2. Activated by renaming to `.exe`
+  3. Relocated to persistence-friendly directory
+  4. Renamed to blend with legitimate service
+  5. Launched via `Launch.bat` for persistent 
+     re-execution
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Track payload forward through all rename events 
+// using SHA256 as the immutable identifier
+DeviceFileEvents
+| where DeviceName == "azwks-phtg-02"
+| where SHA256 == "224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695"
+| where ActionType == "FileRenamed"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| project TimeGenerated, FileName, PreviousFileName, 
+          FolderPath, SHA256, ActionType
+| order by TimeGenerated asc
+```
+
+**Results — Complete Rename Chain:**
+| TimeGenerated | FileName | PreviousFileName | FolderPath |
+|---------------|----------|-----------------|------------|
+| 12/12/2025 14:18:38 | Sarah_Chen_Notes.exe | Sarah_Chen_Notes.exe.Txt | C:\Users\vmAdminUsername\Documents\PHTG\ |
+| 12/13/2025 10:14:41 | Sarah_Chen_Notes.exe | Sarah_Chen_Notes.exe | C:\ProgramData\PHTG\HealthCloud\ |
+| 12/13/2025 10:16:22 | **PHTG.exe** | Sarah_Chen_Notes.exe | C:\ProgramData\PHTG\HealthCloud\ |
+
+```kql
+// Confirm final filename — take the last rename event
+DeviceFileEvents
+| where DeviceName == "azwks-phtg-02"
+| where SHA256 == "224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695"
+| where ActionType == "FileRenamed"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| order by TimeGenerated desc
+| take 1
+| project TimeGenerated, FileName, FolderPath, SHA256
+```
+
+**Result:**
+| TimeGenerated | FileName | FolderPath |
+|---------------|----------|------------|
+| 12/13/2025 10:16:22 | PHTG.exe | C:\ProgramData\PHTG\HealthCloud\ |
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+the complete rename chain with PHTG.exe as the final filename 
+at C:\ProgramData\PHTG\HealthCloud\ on 12/13/2025 10:16:22 UTC>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Establish a file inventory baseline for all 
+  legitimate service directories** — particularly 
+  newly deployed services like HealthCloud. Any 
+  executable appearing in a service directory 
+  that is not part of the expected installation 
+  manifest should trigger an immediate alert:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Alert — unexpected executable in HealthCloud directory
+DeviceFileEvents
+| where FolderPath contains "HealthCloud"
+| where FileName endswith ".exe" 
+    or FileName endswith ".dll"
+    or FileName endswith ".bat"
+    or FileName endswith ".ps1"
+| where ActionType in ("FileCreated", "FileRenamed")
+| where TimeGenerated > ago(24h)
+| project TimeGenerated, DeviceName, FileName, 
+          FolderPath, SHA256,
+          InitiatingProcessAccountName
+```
+
+- **Hunt for any executable in `C:\ProgramData` 
+  not associated with a known software installation** — 
+  `ProgramData` is a common persistence location 
+  for threat actors precisely because it blends 
+  with legitimate software:
+
+```kql
+// Hunt — executables created in ProgramData 
+// by non-system accounts
+DeviceFileEvents
+| where FolderPath startswith "C:\\ProgramData"
+| where FileName endswith ".exe"
+| where ActionType in ("FileCreated", "FileRenamed")
+| where InitiatingProcessAccountName !in 
+    ("system", "local service", "network service")
+| where TimeGenerated between 
+    (datetime(2025-12-09) .. datetime(2025-12-23))
+| project TimeGenerated, DeviceName, FileName, 
+          FolderPath, SHA256, 
+          InitiatingProcessAccountName
+```
+
+- **Implement application allowlisting** for all 
+  service directories — only explicitly approved 
+  executables should be permitted to run from 
+  `C:\ProgramData\PHTG\HealthCloud\`. Any 
+  unlisted binary attempting execution should 
+  be blocked and alerted immediately
+- **Use SHA256-based file integrity monitoring** 
+  on service directories — compare the hash of 
+  every executable in `C:\ProgramData\PHTG\` 
+  against a known-good baseline to detect 
+  any unauthorised additions or modifications
 
 </details>
 
