@@ -204,7 +204,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1133 | External Remote Services | Initial Access | 🔴 Critical |
 | T1583.003 | Acquire Infrastructure: Virtual Private Server | Resource Development | 🟠 High |
 | T1090 | Proxy | Defense Evasion | 🟠 High |
-| 22 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 22 | | T1078.003 | Valid Accounts: Local Accounts | Initial Access | 🔴 Critical |
+| T1078 | Valid Accounts | Defense Evasion / Initial Access | 🔴 Critical |
+| T1133 | External Remote Services | Initial Access | 🔴 Critical |
+| T1021.001 | Remote Services: Remote Desktop Protocol | Lateral Movement | 🔴 Critical |
+| T1583.003 | Acquire Infrastructure: Virtual Private Server | Resource Development | 
 | 23 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 24 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 25 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -3048,34 +3052,139 @@ DeviceLogonEvents
 <summary id="-flag-22">🚩 <strong>Flag 22: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify the specific source IP address associated with the first 
+successful RDP authentication from Uruguay to establish the initial 
+point of confirmed unauthorised access, anchor the investigation 
+timeline, and begin correlating threat actor infrastructure across 
+the full kill chain.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `173.244.55.131`**
 
-### 🔍 Evidence
+The first successful RDP authentication from Uruguay originated 
+from **`173.244.55.131`** at **12/12/2025 05:47:45 UTC** — 
+just one day after the HealthCloud rollout on 11 December 2025 
+and consistent with the LinkedIn post exposure window. This IP 
+is part of the `173.244.55.0/24` subnet used throughout the 
+attack chain for both initial access and C2 callbacks.
 
 | Field | Value |
-|------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+|-------|-------|
+| First Auth Timestamp | 12/12/2025 05:47:45 UTC |
+| Source IP | 173.244.55.131 |
+| Account | vmadminusername |
+| Country | Uruguay |
+| Subnet | 173.244.55.0/24 |
+
+### 🔍 Evidence
+| Field | Value |
+|-------|-------|
+| Host | azwks-phtg-02 |
+| First Successful Auth IP | 173.244.55.131 |
+| First Successful Auth Time | 12/12/2025 05:47:45 UTC |
+| Account Used | vmadminusername |
+| Country | Uruguay |
+| Related IPs in Same Subnet | 173.244.55.128 (access), 173.244.55.130 (C2) |
+| Investigation Window | 09 December – 23 December 2025 UTC |
+| Timestamp | 12/12/2025 05:47:45 UTC |
+| Process | N/A — Authentication telemetry, no process execution |
+| Parent Process | N/A — Authentication telemetry, no process execution |
+| Command Line | N/A — Authentication telemetry, no process execution |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The first successful authentication IP is the most critical 
+single indicator of compromise in this investigation for 
+several reasons:
+
+- **It marks the moment of confirmed unauthorised access** — 
+  05:47:45 UTC on 12 December 2025 is the definitive 
+  start of the incident. Everything before this timestamp 
+  is reconnaissance and brute force; everything after 
+  is post-exploitation
+- **It anchors the infrastructure attribution** — 
+  `173.244.55.131` belongs to the same /24 subnet as 
+  `173.244.55.128` (second access IP) and `173.244.55.130` 
+  (C2 callback IP). This subnet convergence across three 
+  distinct attack phases — initial access, persistent 
+  access, and C2 — confirms a single, organised threat 
+  actor operating from dedicated Uruguayan infrastructure
+- **Timeline correlation with the LinkedIn post** — 
+  The first successful authentication occurred 
+  approximately 18 hours after the LinkedIn post 
+  would have been visible. This is consistent with 
+  an attacker who:
+  1. Saw the post and identified the target
+  2. Began automated credential stuffing against 
+     the exposed RDP service
+  3. Successfully authenticated within 24 hours
+- **This IP should be the starting point for all 
+  threat intelligence enrichment** — submitting 
+  `173.244.55.131` to internal threat intelligence 
+  platforms (respecting the lab's OPSEC rules) 
+  would reveal additional context about the 
+  infrastructure and potential attribution
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Identify the first successful RDP authentication from Uruguay
+let GeoTable =
+    externaldata(network:string, geoname_id:long, continent_code:string, 
+                 continent_name:string, country_iso_code:string, country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| where ActionType == "LogonSuccess"
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| where country_name == "Uruguay"
+| order by TimeGenerated asc
+| take 1
+| project TimeGenerated, RemoteIP, AccountName
+```
+
+**Result:**
+| TimeGenerated [UTC] | RemoteIP | AccountName |
+|--------------------|----------|-------------|
+| 12/12/2025, 5:47:45 AM | 173.244.55.131 | vmadminusername |
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+173.244.55.131 as the first successful RDP authentication from 
+Uruguay at 12/12/2025 05:47:45 UTC>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Use the incident start timestamp (12/12/2025 05:47:45 UTC) 
+  as the anchor for all subsequent investigation** — every 
+  process, file, and network event after this timestamp 
+  under the `vmadminusername` context should be treated 
+  as potentially malicious:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// All activity after confirmed initial access
+DeviceProcessEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated >= datetime(2025-12-12T05:47:45Z)
+| where InitiatingProcessAccountName =~ "vmadminusername"
+| project TimeGenerated, FileName, ProcessCommandLine,
+          InitiatingProcessFileName, InitiatingProcessCommandLine
+| order by TimeGenerated asc
+```
+
+- **Block `173.244.55.0/24` immediately** at all 
+  network perimeter controls — this subnet has been 
+  confirmed as threat actor infrastructure across 
+  multiple attack phases
+- **Establish T0 (time zero) alerting** — implement 
+  a detection rule that triggers the moment any 
+  successful authentication is recorded from a 
+  non-approved country, with automatic containment 
+  actions (session termination, account lock, 
+  endpoint isolation) to prevent post-exploitation 
+  activity before it begins
 
 </details>
 
