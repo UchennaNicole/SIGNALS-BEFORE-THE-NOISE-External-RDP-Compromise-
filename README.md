@@ -198,7 +198,12 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1021.001 | Remote Services: Remote Desktop Protocol | Lateral Movement | 🔴 Critical |
 | T1133 | External Remote Services | Initial Access | 🔴 Critical |
 | T1098 | Account Manipulation | Persistence | 🟠 High |
-| 21 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 21 | | T1078.003 | Valid Accounts: Local Accounts | Initial Access | 🔴 Critical |
+| T1078 | Valid Accounts | Defense Evasion / Persistence | 🔴 Critical |
+| T1021.001 | Remote Services: Remote Desktop Protocol | Lateral Movement | 🔴 Critical |
+| T1133 | External Remote Services | Initial Access | 🔴 Critical |
+| T1583.003 | Acquire Infrastructure: Virtual Private Server | Resource Development | 🟠 High |
+| T1090 | Proxy | Defense Evasion | 🟠 High |
 | 22 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 23 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 24 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -2877,34 +2882,163 @@ DeviceLogonEvents
 <summary id="-flag-21">🚩 <strong>Flag 21: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Quantify the total number of successful RDP authentication events 
+originating specifically from Uruguay to establish the full scope 
+of confirmed unauthorised access sessions and determine the 
+persistence and duration of the threat actor's presence on 
+`azwks-phtg-02`.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `23`**
+
+A total of **23 successful RDP authentication events** originated 
+from Uruguay during the investigation window. All 23 events used 
+the account `vmadminusername` and originated from two IP addresses 
+within the same /24 subnet — confirming a single threat actor 
+operating from dedicated Uruguayan infrastructure across multiple 
+sessions.
+
+| Source IP | Successful Auth Events | Subnet |
+|-----------|----------------------|--------|
+| 173.244.55.131 | 13 | 173.244.55.0/24 |
+| 173.244.55.128 | 10 | 173.244.55.0/24 |
+| **Total** | **23** | |
 
 ### 🔍 Evidence
-
 | Field | Value |
 |------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+| Host | azwks-phtg-02 |
+| Anomalous Country | Uruguay |
+| Total Successful Auth Events | 23 |
+| Account Used | vmadminusername |
+| Source IP 1 | 173.244.55.131 (13 events) |
+| Source IP 2 | 173.244.55.128 (10 events) |
+| C2 IP (same subnet) | 173.244.55.130 |
+| First Successful Auth | 12/12/2025 05:47:45 UTC |
+| Investigation Window | 09 December – 23 December 2025 UTC |
+| Timestamp | 12 December 2025 – 23 December 2025 UTC |
+| Process | N/A — Authentication telemetry, no process execution |
+| Parent Process | N/A — Authentication telemetry, no process execution |
+| Command Line | N/A — Authentication telemetry, no process execution |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The volume and pattern of 23 successful authentications from 
+Uruguay reveals critical information about the threat actor's 
+operational behaviour:
+
+- **23 sessions indicates sustained, persistent access** — 
+  This is not a single opportunistic login. The threat actor 
+  returned to `azwks-phtg-02` repeatedly over multiple days, 
+  suggesting ongoing objectives that required extended 
+  interactive access
+- **Two source IPs from the same /24 subnet** — The use 
+  of `173.244.55.128` and `173.244.55.131` from the same 
+  subnet as the C2 IP (`173.244.55.130`) confirms a 
+  single dedicated infrastructure block used throughout 
+  the attack chain. This is not coincidental — it 
+  represents deliberate, organised threat actor 
+  infrastructure
+- **Timeline begins day after HealthCloud rollout** — 
+  The first successful authentication on 12/12/2025 
+  occurred just one day after HealthCloud was deployed 
+  on 11/12/2025. The LinkedIn post exposure and the 
+  timing of first access confirm a direct causal link 
+  between the OPSEC failure and the compromise
+- **23 sessions = 23 opportunities for data exfiltration, 
+  reconnaissance, and persistence** — Each successful 
+  authentication represents a window during which the 
+  threat actor could execute commands, transfer files, 
+  modify configurations, and expand their foothold
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Count successful RDP authentications from Uruguay
+let GeoTable =
+    externaldata(network:string, geoname_id:long, continent_code:string, 
+                 continent_name:string, country_iso_code:string, country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| where ActionType == "LogonSuccess"
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| where country_name == "Uruguay"
+| summarize count() by AccountName
+```
+
+**Result: 23**
+
+```kql
+// Breakdown by source IP to confirm infrastructure pattern
+let GeoTable =
+    externaldata(network:string, geoname_id:long, continent_code:string, 
+                 continent_name:string, country_iso_code:string, country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| where ActionType == "LogonSuccess"
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| where country_name == "Uruguay"
+| summarize count() by RemoteIP
+| order by count_ desc
+```
+
+**Results:**
+| RemoteIP | count_ |
+|----------|--------|
+| 173.244.55.131 | 13 |
+| 173.244.55.128 | 10 |
+| **Total** | **23** |
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+23 total successful RDP authentication events from Uruguay, 
+broken down by source IP>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Build a session timeline** to map the full scope 
+  of threat actor access across all 23 sessions:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Full timeline of Uruguay RDP sessions
+let GeoTable =
+    externaldata(network:string, geoname_id:long, continent_code:string, 
+                 continent_name:string, country_iso_code:string, country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LogonType in ("RemoteInteractive", "Network")
+| where ActionType == "LogonSuccess"
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| where country_name == "Uruguay"
+| project TimeGenerated, RemoteIP, AccountName, 
+          LogonType, country_name
+| order by TimeGenerated asc
+```
+
+- **Correlate each session timestamp with process 
+  telemetry** — for each of the 23 session start 
+  times, review `DeviceProcessEvents` for commands 
+  executed within the following 30-60 minutes to 
+  map threat actor actions per session
+- **Implement session recording for RDP** — tools 
+  like Azure Bastion provide session recording 
+  capabilities that would allow full playback of 
+  threat actor activity during each interactive session
+- **Block `173.244.55.0/24` immediately** at the 
+  Azure NSG level — all three IPs from this subnet 
+  (`173.244.55.128`, `173.244.55.130`, `173.244.55.131`) 
+  have been confirmed as threat actor infrastructure
 
 </details>
 
