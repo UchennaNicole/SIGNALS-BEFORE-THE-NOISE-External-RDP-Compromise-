@@ -280,8 +280,17 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1095 | Non-Application Layer Protocol | Command and Control | 🔴 Critical |
 | T1090.003 | Proxy: Multi-hop Proxy | Defense Evasion | 🟠 High |
 | T1008 | Fallback Channels | Command and Control | 🟠 High |
-| 37 | <Placeholder> | <Placeholder> | <Placeholder> |
-| 38 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 37 | | T1095 | Non-Application Layer Protocol | Command and Control | 🔴 Critical |
+| T1571 | Non-Standard Port | Command and Control | 🔴 Critical |
+| T1071 | Application Layer Protocol | Command and Control | 🟠 High | 
+| T1583.003 | Acquire Infrastructure: Virtual Private Server | Resource Development | 🟠 High |
+| T1008 | Fallback Channels | Command and Control | 🟠 High |
+| 38 | | T1036.005 | Masquerading: Match Legitimate Name or Location | Defense Evasion | 🔴 Critical |
+| T1036 | Masquerading | Defense Evasion | 🔴 Critical |
+| T1543.003 | Create or Modify System Process: Windows Service | Persistence | 🔴 Critical |
+| T1053.005 | Scheduled Task/Job: Scheduled Task | Persistence | 🔴 Critical |
+| T1574 | Hijack Execution Flow | Persistence / Defense Evasion | 🟠 High |
+| T1027 | Obfuscated Files or Information | Defense Evasion | 🟠 High |
 ---
 
 ## 🔍 Flag Analysis
@@ -5973,34 +5982,191 @@ DeviceNetworkEvents
 <summary id="-flag-37">🚩 <strong>Flag 37: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Confirm the specific remote port used by the Meterpreter 
+payload for C2 callback attempts following execution on 
+`azwks-phtg-02` — establishing the network-level indicator 
+of compromise and confirming the threat actor's C2 
+configuration choices.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `4444`**
+
+The Meterpreter payload used remote port **`4444`** for 
+all C2 callback attempts to `173.244.55.130`. Port 4444 
+is the default Metasploit Framework listener port — its 
+use without modification confirms the threat actor deployed 
+an out-of-the-box Meterpreter configuration without 
+customising the C2 port to blend with legitimate traffic 
+on common ports like 80 or 443.
+
+| Callback Event | Timestamp | RemoteIP | RemotePort | ActionType |
+|----------------|-----------|----------|------------|------------|
+| 1 | 12/12/2025 14:19:12 UTC | 173.244.55.130 | 4444 | ConnectionFailed |
+| 2 | 12/13/2025 10:13:39 UTC | 173.244.55.130 | 4444 | ConnectionFailed |
+| 3 | 12/13/2025 10:22:09 UTC | 173.244.55.130 | 4444 | ConnectionFailed |
 
 ### 🔍 Evidence
-
 | Field | Value |
-|------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+|-------|-------|
+| Host | azwks-phtg-02 |
+| C2 Remote Port | 4444 |
+| C2 Remote IP | 173.244.55.130 |
+| Protocol | TCP |
+| ActionType | ConnectionFailed (all 3 attempts) |
+| Callback Count | 3 |
+| Initiating Process Phase 1 | sarah_chen_notes.exe |
+| Initiating Process Phase 2 | phtg.exe |
+| SHA256 | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 |
+| Malware Family | Trojan:Win32/Meterpreter.RPZ!MTB |
+| C2 Country | Uruguay, South America |
+| Timestamp | 12/12/2025 14:19:12 – 12/13/2025 10:22:09 UTC |
+| Process | sarah_chen_notes.exe / phtg.exe |
+| Parent Process | explorer.exe / cmd.exe |
+| Command Line | N/A — Network callback event |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The use of port 4444 as the C2 communication port is 
+significant for both detection and threat actor profiling:
+
+- **Port 4444 is the Metasploit default** — This is 
+  the hardcoded default listener port in the Metasploit 
+  Framework's `exploit/multi/handler` module. Any 
+  security tool or network monitoring solution with 
+  basic threat intelligence integration will flag 
+  outbound connections to port 4444 as a high-severity 
+  indicator of Meterpreter C2 activity
+- **No port customisation indicates lower operational 
+  security** — Experienced threat actors typically 
+  reconfigure Meterpreter to communicate over port 
+  443 (HTTPS) to blend with legitimate encrypted 
+  web traffic. The use of port 4444 without 
+  modification suggests:
+  - The threat actor prioritised speed over 
+    operational security
+  - Limited technical sophistication in C2 
+    infrastructure configuration
+  - Possible use of a default Metasploit 
+    configuration without customisation
+- **Port 4444 is immediately detectable** — Unlike 
+  C2 traffic masquerading as HTTPS on port 443, 
+  outbound connections to port 4444 have no 
+  legitimate business justification on a corporate 
+  endpoint. Any egress filtering or outbound 
+  port monitoring would have immediately flagged 
+  these callback attempts
+- **All callbacks failed — C2 was never established** — 
+  Despite three execution attempts across two 
+  phases, the Meterpreter payload never successfully 
+  connected to the C2 listener. The threat actor's 
+  primary post-exploitation tool was neutralised 
+  not by defensive controls but by their own C2 
+  infrastructure not being ready to receive connections
+- **This port completes the full IOC set** — 
+  Combined with the C2 IP (`173.244.55.130`) and 
+  payload hash, the triple IOC of 
+  `173.244.55.130:4444` + SHA256 provides a 
+  comprehensive network and host-based detection 
+  signature for this specific Meterpreter deployment
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// C2 callback port identification using 
+// payload SHA256 as process identifier
+DeviceNetworkEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-12T14:00:00Z) 
+                            .. datetime(2025-12-23))
+| where InitiatingProcessSHA256 == 
+    "224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695"
+| where RemoteIPType == "Public"
+| project TimeGenerated, RemoteIP, RemotePort, 
+          InitiatingProcessFileName, ActionType
+| order by TimeGenerated asc
+```
+
+**Results:**
+| TimeGenerated | RemoteIP | RemotePort | InitiatingProcessFileName | ActionType |
+|---------------|----------|------------|--------------------------|------------|
+| 12/12/2025 14:19:12 | 173.244.55.130 | **4444** | sarah_chen_notes.exe | ConnectionFailed |
+| 12/13/2025 10:13:39 | 173.244.55.130 | **4444** | sarah_chen_notes.exe | ConnectionFailed |
+| 12/13/2025 10:22:09 | 173.244.55.130 | **4444** | phtg.exe | ConnectionFailed |
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+all three C2 callback attempts to 173.244.55.130 on port 4444, 
+with ConnectionFailed ActionType across both execution phases>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Block all outbound connections on port 4444** 
+  at the Azure NSG and perimeter firewall level — 
+  there is no legitimate business use case for 
+  outbound TCP/4444 from a corporate endpoint:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Alert — outbound connection attempt on port 4444
+DeviceNetworkEvents
+| where RemotePort == 4444
+| where RemoteIPType == "Public"
+| where TimeGenerated > ago(1h)
+| project TimeGenerated, DeviceName, RemoteIP, 
+          RemotePort, ActionType,
+          InitiatingProcessFileName,
+          InitiatingProcessSHA256
+```
+
+- **Monitor for other common Metasploit default ports** — 
+  in addition to 4444, alert on outbound connections 
+  to other Metasploit/Meterpreter default ports:
+
+```kql
+// Alert — Metasploit default port outbound connections
+DeviceNetworkEvents
+| where RemotePort in (4444, 4445, 5555, 8080, 8443, 
+                       6667, 1234, 31337)
+| where RemoteIPType == "Public"
+| where TimeGenerated > ago(1h)
+| summarize 
+    EventCount = count(),
+    UniqueDestinations = dcount(RemoteIP)
+    by DeviceName, RemotePort, 
+       InitiatingProcessFileName
+| order by EventCount desc
+```
+
+- **Implement strict egress filtering** — corporate 
+  endpoints should only be permitted to make 
+  outbound connections on explicitly approved 
+  ports (80, 443, 53, 123, etc.). Any connection 
+  attempt on an unapproved port should be 
+  blocked by default and logged for investigation:
+
+```kql
+// Hunt — outbound connections on non-standard ports
+DeviceNetworkEvents
+| where RemoteIPType == "Public"
+| where RemotePort !in (80, 443, 8080, 8443, 53, 
+                         123, 25, 587, 993, 995, 
+                         143, 110, 21, 22, 3389)
+| where TimeGenerated > ago(24h)
+| summarize 
+    EventCount = count(),
+    UniqueDestinations = dcount(RemoteIP),
+    Processes = make_set(InitiatingProcessFileName)
+    by DeviceName, RemotePort
+| order by EventCount desc
+```
+
+- **Complete IOC Summary for Network Blocking:**
+
+| IOC Type | Value | Block Action |
+|----------|-------|--------------|
+| IP Address | 173.244.55.128 | Block inbound/outbound |
+| IP Address | 173.244.55.130 | Block inbound/outbound |
+| IP Address | 173.244.55.131 | Block inbound/outbound |
+| CIDR Block | 173.244.55.0/24 | Block inbound/outbound |
+| Port | 4444/TCP outbound | Block at NSG and firewall |
+| SHA256 | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 | EDR blocklist |
 
 </details>
 
@@ -6012,34 +6178,222 @@ DeviceNetworkEvents
 <summary id="-flag-38">🚩 <strong>Flag 38: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify the legitimate internal service whose directory 
+was hijacked by the threat actor as a hiding place for 
+the final Meterpreter payload and persistence mechanism 
+— confirming how the attacker exploited PHTG's own 
+recently deployed infrastructure to camouflage their 
+malicious activity.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `HealthCloud`**
+
+The threat actor placed both the final payload (`PHTG.exe`) 
+and the persistence mechanism (`Launch.bat`) inside 
+**`C:\ProgramData\PHTG\HealthCloud\`** — the installation 
+directory of PHTG's legitimate internal endpoint health 
+service, **HealthCloud**, which was rolled out on 
+**11 December 2025** — just one day before the confirmed 
+initial access on 12 December 2025.
+
+**Files Planted in the HealthCloud Directory:**
+
+| Filename | Type | Purpose |
+|----------|------|---------|
+| PHTG.exe | Meterpreter payload | Post-exploitation C2 agent |
+| Launch.bat | Batch persistence script | Automated payload re-execution |
 
 ### 🔍 Evidence
-
 | Field | Value |
-|------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+|-------|-------|
+| Host | azwks-phtg-02 |
+| Hijacked Service | HealthCloud |
+| Service Rollout Date | 11 December 2025 |
+| Initial Access Date | 12 December 2025 |
+| Days Between Rollout and Compromise | 1 |
+| Malicious Payload Path | C:\ProgramData\PHTG\HealthCloud\PHTG.exe |
+| Persistence Mechanism Path | C:\ProgramData\PHTG\HealthCloud\Launch.bat |
+| SHA256 (Payload) | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 |
+| Malware Family | Trojan:Win32/Meterpreter.RPZ!MTB |
+| Account | vmadminusername |
+| Timestamp | 12/13/2025 10:14:41 – 10:16:22 UTC |
+| Process | PHTG.exe |
+| Parent Process | cmd.exe |
+| Command Line | cmd.exe /c "C:\ProgramData\PHTG\HealthCloud\Launch.bat" |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The exploitation of the HealthCloud directory as a 
+persistence location is one of the most strategically 
+sophisticated elements of this attack:
+
+- **Deliberate exploitation of deployment timing** — 
+  HealthCloud was deployed on 11 December 2025. 
+  The threat actor gained access on 12 December 2025 
+  and planted their payload in the HealthCloud 
+  directory on 13 December 2025. The attacker 
+  moved within 48 hours of the service rollout — 
+  exploiting the window when defenders would be 
+  least familiar with HealthCloud's expected 
+  file system footprint
+- **New service = no baseline** — Because HealthCloud 
+  had only been deployed for two days, no file 
+  integrity baseline existed. Security teams had 
+  no reference point for what files should or 
+  should not be present in 
+  `C:\ProgramData\PHTG\HealthCloud\`. The attacker 
+  exploited this blind spot deliberately
+- **Legitimate service activity provides cover** — 
+  The hunt brief explicitly states HealthCloud 
+  generates "scheduled PowerShell tasks, background 
+  service executables, diagnostic cache directories, 
+  and periodic outbound check-ins." The threat 
+  actor's `PHTG.exe` and `Launch.bat` were designed 
+  to blend with this expected activity pattern — 
+  an executable and a batch launcher in a service 
+  directory are entirely consistent with legitimate 
+  service components
+- **The LinkedIn post enabled this exploitation** — 
+  The entire chain traces back to Sarah Chen's 
+  LinkedIn post announcing the HealthCloud rollout. 
+  The attacker saw the post, identified the 
+  infrastructure, gained access within 24 hours, 
+  and then used their knowledge of HealthCloud 
+  (obtained from the post) to plant their payload 
+  in the most defensively advantageous location 
+  on the compromised host
+- **This is a living-off-the-land persistence 
+  strategy** — Rather than creating a new, 
+  obviously malicious directory or registry key, 
+  the attacker co-opted existing, legitimate 
+  infrastructure. This represents a deliberate 
+  choice to minimise forensic footprint and 
+  maximise persistence survivability
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Confirm malicious files planted in HealthCloud directory
+DeviceFileEvents
+| where DeviceName == "azwks-phtg-02"
+| where FolderPath contains "HealthCloud"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where ActionType in ("FileCreated", "FileRenamed")
+| where InitiatingProcessAccountName =~ "vmadminusername"
+| project TimeGenerated, FileName, FolderPath, 
+          ActionType, SHA256,
+          InitiatingProcessAccountName
+| order by TimeGenerated asc
+```
+
+**Results:**
+| TimeGenerated | FileName | FolderPath | ActionType |
+|---------------|----------|------------|------------|
+| 12/13/2025 10:14:41 | Sarah_Chen_Notes.exe | C:\ProgramData\PHTG\HealthCloud\ | FileRenamed |
+| 12/13/2025 10:16:22 | PHTG.exe | C:\ProgramData\PHTG\HealthCloud\ | FileRenamed |
+
+```kql
+// Confirm Launch.bat creation in HealthCloud directory
+DeviceFileEvents
+| where DeviceName == "azwks-phtg-02"
+| where FolderPath contains "HealthCloud"
+| where FileName == "Launch.bat"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| project TimeGenerated, FileName, FolderPath, 
+          ActionType, InitiatingProcessAccountName
+```
+
+```kql
+// Full HealthCloud directory activity timeline
+// Shows both legitimate and malicious file operations
+DeviceFileEvents
+| where DeviceName == "azwks-phtg-02"
+| where FolderPath contains "HealthCloud"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| project TimeGenerated, FileName, FolderPath, 
+          ActionType, SHA256,
+          InitiatingProcessAccountName
+| order by TimeGenerated asc
+```
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+PHTG.exe and Launch.bat planted in 
+C:\ProgramData\PHTG\HealthCloud\ by vmadminusername on 
+12/13/2025 — alongside the hunt brief context confirming 
+HealthCloud was deployed on 11 December 2025>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Establish file inventory baselines for all 
+  newly deployed services immediately upon 
+  rollout** — capture the expected file list, 
+  hashes, and permissions for every service 
+  directory at deployment time. Any deviation 
+  from this baseline should trigger an alert:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Baseline comparison — files in HealthCloud 
+// directory not present at deployment time
+// (Replace deployment_date with actual rollout date)
+DeviceFileEvents
+| where FolderPath contains "HealthCloud"
+| where ActionType == "FileCreated"
+| where TimeGenerated > datetime(2025-12-11)
+| where InitiatingProcessAccountName !in 
+    ("system", "local service", "network service",
+     "healthcloud_service_account")
+| project TimeGenerated, DeviceName, FileName, 
+          FolderPath, SHA256,
+          InitiatingProcessAccountName
+```
+
+- **Alert on executable or batch file creation 
+  in any service directory by non-service accounts** — 
+  `vmadminusername` creating files in a service 
+  directory is immediately anomalous:
+
+```kql
+// Alert — non-service account creating 
+// executables in service directories
+DeviceFileEvents
+| where FolderPath startswith "C:\\ProgramData\\"
+| where FileName endswith ".exe" 
+    or FileName endswith ".bat"
+    or FileName endswith ".ps1"
+| where ActionType in ("FileCreated", "FileRenamed")
+| where InitiatingProcessAccountName !in 
+    ("system", "local service", "network service")
+| where TimeGenerated > ago(24h)
+| project TimeGenerated, DeviceName, FileName, 
+          FolderPath, InitiatingProcessAccountName
+```
+
+- **Implement security awareness around new 
+  service deployments** — the 48-hour window 
+  between HealthCloud's rollout and the threat 
+  actor's exploitation of its directory highlights 
+  the need for heightened monitoring during and 
+  immediately after any new service deployment:
+  - Enable enhanced file integrity monitoring 
+    on new service directories from day one
+  - Restrict write permissions to service 
+    directories to dedicated service accounts only
+  - Conduct a file inventory audit 24-48 hours 
+    after every new service deployment
+
+- **Complete Remediation Checklist for This Incident:**
+
+| Action | Target | Priority |
+|--------|--------|----------|
+| Delete | C:\ProgramData\PHTG\HealthCloud\PHTG.exe | 🔴 Immediate |
+| Delete | C:\ProgramData\PHTG\HealthCloud\Launch.bat | 🔴 Immediate |
+| Audit | All scheduled tasks on azwks-phtg-02 | 🔴 Immediate |
+| Reset | vmadminusername credentials | 🔴 Immediate |
+| Disable | RDP public exposure on azwks-phtg-02 | 🔴 Immediate |
+| Block | 173.244.55.0/24 at all network controls | 🔴 Immediate |
+| Enable | Defender active mode on all endpoints | 🔴 Immediate |
+| Establish | HealthCloud file baseline inventory | 🟠 High |
+| Review | All other PHTG VMs for same IOCs | 🟠 High |
+| Implement | Azure Bastion for all RDP access | 🟠 High |
 
 </details>
 
