@@ -186,7 +186,12 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1021.001 | Remote Services: Remote Desktop Protocol | Lateral Movement | 🔴 Critical |
 | T1090.003 | Proxy: Multi-hop Proxy | Defense Evasion | 🟠 High |
 | T1583.003 | Acquire Infrastructure: Virtual Private Server | Resource Development |
-| 19 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 19 | | T1078 | Valid Accounts | Defense Evasion / Initial Access | 🔴 Critical |
+| T1078.003 | Valid Accounts: Local Accounts | Initial Access | 🔴 Critical |
+| T1133 | External Remote Services | Initial Access | 🔴 Critical |
+| T1021.001 | Remote Services: Remote Desktop Protocol | Lateral Movement | 🔴 Critical |
+| T1583.003 | Acquire Infrastructure: Virtual Private Server | Resource Development | 🟠 High |
+| T1090 | Proxy | Defense Evasion | 🟠 High |
 | 20 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 21 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 22 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -2553,34 +2558,146 @@ DeviceLogonEvents
 <summary id="-flag-19">🚩 <strong>Flag 19: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Apply PHTG's known operating context — exclusively United States 
+based with no international workforce — to the successful RDP 
+authentication geographic data to identify which country represents 
+a definitive anomaly and confirmed indicator of unauthorised access.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `Uruguay`**
+
+Uruguay is the only country associated with successful RDP 
+authentication that falls entirely outside PHTG's expected 
+operating region. With 23 successful authentication events 
+originating from Uruguayan infrastructure, this represents 
+the single most significant geographic anomaly in the 
+investigation and the primary indicator of confirmed 
+unauthorised access.
+
+| Country | Auth Events | Within PHTG Operating Region | Verdict |
+|---------|-------------|------------------------------|---------|
+| United States | 6 | ✅ Yes | Expected |
+| Uruguay | 23 | ❌ No | 🚨 Anomalous — Confirmed IOC |
 
 ### 🔍 Evidence
-
 | Field | Value |
 |------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+| Host | azwks-phtg-02 |
+| Anomalous Country | Uruguay |
+| Successful Auth Events from Uruguay | 23 |
+| PHTG Operating Region | United States only |
+| Account Used | vmadminusername |
+| Uruguay Source IPs | 173.244.55.128, 173.244.55.131 |
+| C2 IP (same subnet) | 173.244.55.130 |
+| First Successful Auth | 12/12/2025 05:47:45 UTC |
+| Investigation Window | 09 December – 23 December 2025 UTC |
+| Timestamp | 12 December 2025 – 23 December 2025 UTC |
+| Process | N/A — Authentication telemetry, no process execution |
+| Parent Process | N/A — Authentication telemetry, no process execution |
+| Command Line | N/A — Authentication telemetry, no process execution |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The identification of Uruguay as the anomalous country is the 
+critical pivot point that transforms this investigation from 
+a broad authentication analysis into a focused incident response:
+
+- **Zero legitimate justification** — PHTG has no employees, 
+  contractors, partners, or operations in Uruguay. There is 
+  no scenario in which a successful RDP authentication from 
+  Uruguay represents authorised access
+- **23 successful authentications confirm persistent access** — 
+  This is not a single opportunistic login. 23 successful 
+  sessions from Uruguayan infrastructure over the investigation 
+  window indicates sustained, deliberate, and repeated 
+  unauthorised access
+- **Infrastructure convergence is definitive** — The Uruguay 
+  source IPs (`173.244.55.128` and `173.244.55.131`) share 
+  a /24 subnet with the Meterpreter C2 callback IP 
+  (`173.244.55.130`). The same infrastructure block was 
+  used for initial access AND post-exploitation C2 — 
+  confirming a single threat actor operating from 
+  Uruguayan infrastructure throughout the attack chain
+- **Timeline correlation with the LinkedIn post** — The 
+  first successful Uruguay authentication occurred on 
+  12/12/2025 at 05:47:45 UTC — just one day after 
+  HealthCloud was rolled out (11 December) and 
+  consistent with the LinkedIn post exposure window. 
+  The attacker saw the post, identified the target, 
+  and gained access within 24 hours
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Identify anomalous country by filtering successful auth 
+// events and applying PHTG operating region context
+let GeoTable =
+    externaldata(network:string, geoname_id:long, continent_code:string, 
+                 continent_name:string, country_iso_code:string, country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| where ActionType == "LogonSuccess"
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| where country_iso_code != "US"
+| summarize count() by country_name, country_iso_code
+| order by count_ desc
+```
+
+**Result:**
+| country_name | country_iso_code | count_ |
+|--------------|-----------------|--------|
+| Uruguay | UY | 23 |
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+Uruguay as the sole non-US country with successful RDP 
+authentication events, with 23 events recorded>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Implement an automated geographic anomaly detection 
+  rule** that triggers a P1 incident for any successful 
+  authentication from outside PHTG's operating region:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// P1 Alert — successful auth from outside operating region
+let GeoTable =
+    externaldata(network:string, geoname_id:long, continent_code:string, 
+                 continent_name:string, country_iso_code:string, country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+let AllowedCountries = datatable(country_iso_code:string) ["US"];
+DeviceLogonEvents
+| where ActionType == "LogonSuccess"
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| where TimeGenerated > ago(1h)
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| where country_iso_code !in (AllowedCountries)
+| project TimeGenerated, DeviceName, AccountName,
+          RemoteIP, LogonType, country_name
+| order by TimeGenerated desc
+```
+
+- **Block the entire `173.244.55.0/24` subnet** at the 
+  network perimeter immediately — this subnet was used 
+  for scanning, initial access, and C2 activity. All 
+  three IPs identified in this investigation 
+  (`173.244.55.128`, `173.244.55.130`, `173.244.55.131`) 
+  belong to this block
+- **Document Uruguay as a threat actor indicator** in 
+  your threat intelligence platform and apply blocking 
+  rules for this geographic region at the firewall 
+  and Azure NSG level
+- **Pivot immediately to process telemetry** — with 
+  Uruguay confirmed as the anomalous access origin, 
+  the next step is to review all `DeviceProcessEvents` 
+  initiated by `vmadminusername` from 12/12/2025 
+  05:47:45 UTC onwards to map the full scope of 
+  threat actor activity on the compromised endpoint
 
 </details>
 
