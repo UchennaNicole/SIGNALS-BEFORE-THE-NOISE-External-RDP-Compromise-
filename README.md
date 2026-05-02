@@ -147,7 +147,12 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1590.005 | Gather Victim Network Information: IP Addresses | Reconnaissance | 🟠 High |
 | T1583.003 | Acquire Infrastructure: Virtual Private Server | Resource Development | 🟠 High |
 | T1090 | Proxy | Defense Evasion | 🟠 High |
-| 12 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 12 | | T1110.001 | Brute Force: Password Guessing | Credential Access | 🔴 Critical | 
+| T1110.003 | Brute Force: Password Spraying | Credential Access | 🔴 Critical | 
+| T1110 | Brute Force | Credential Access | 🔴 Critical | 
+| T1078 | Valid Accounts | Defense Evasion / Initial Access | 🔴 Critical | 
+| T1133 | External Remote Services | Initial Access | 🔴 Critical |
+| T1021.001 | Remote Services: Remote Desktop Protocol | Lateral Movement |
 | 13 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 14 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 15 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -1406,26 +1411,116 @@ by DeviceName, country_name, country_iso_code
 <summary id="-flag-12">🚩 <strong>Flag 12: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Quantify the total number of authentication events originating from 
+external public IP addresses against `azwks-phtg-02` during the 
+investigation window. This establishes the scale of credential-based 
+attacks that followed the network scanning phase and determines how 
+many external actors progressed from scanning to active authentication 
+attempts.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: 675**
+
+A total of **675 externally sourced authentication events** were 
+recorded in `DeviceLogonEvents` for `azwks-phtg-02` during the 
+investigation window. This breaks down as follows:
+
+| ActionType | LogonType | Count |
+|------------|-----------|-------|
+| LogonFailed | Network | 646 |
+| LogonSuccess | Network | 21 |
+| LogonSuccess | RemoteInteractive | 8 |
+| **Total** | | **675** |
+
+> **Investigative Note:** An initial query filtering on 
+> `RemoteIPType == "Public"` and `LogonType == "RemoteInteractive"` 
+> returned only 8 events. The filter was progressively broadened 
+> to include `LogonType == "Network"` and remove the 
+> `RemoteIPType` filter, revealing the full picture of 675 
+> externally sourced authentication events across both 
+> Network and RemoteInteractive logon types.
+
 
 ### 🔍 Evidence
 
 | Field | Value |
 |------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+| Host | azwks-phtg-02 |
+| Total External Auth Events | 675 |
+| LogonFailed (Network) | 646 |
+| LogonSuccess (Network) | 21 |
+| LogonSuccess (RemoteInteractive) | 8 |
+| Investigation Window | 09 December – 23 December 2025 UTC |
+| Timestamp | 09 December 2025 – 23 December 2025 UTC |
+| Process | N/A — Authentication telemetry, no process execution |
+| Parent Process | N/A — Authentication telemetry, no process execution |
+| Command Line | N/A — Authentication telemetry, no process execution |
+
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The volume and breakdown of externally sourced authentication events 
+reveals the full scope of the credential-based attack phase:
+
+- **646 failed Network logons** — consistent with automated 
+  credential stuffing or brute force tools submitting large volumes 
+  of username/password combinations via the RDP pre-authentication 
+  network layer
+- **21 successful Network logons** — Network logon successes via 
+  RDP pre-authentication indicate the actor identified valid 
+  credentials and progressed to full session establishment
+- **8 successful RemoteInteractive logons** — These represent 
+  full interactive RDP desktop sessions established by the threat 
+  actor — the highest-fidelity indicator of successful compromise
+- The ratio of failures to successes (646:29) suggests a 
+  credential stuffing attack using a list of common or 
+  previously breached credentials rather than a pure 
+  sequential brute force
+
+The progression from 225 scanning IPs → 675 auth events → 
+29 successes tells the story of how the attack moved from 
+reconnaissance through to confirmed access.
+
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Initial query — RemoteInteractive only (returned 8, incorrect)
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where RemoteIPType == "Public"
+| where LogonType == "RemoteInteractive"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| summarize count() by ActionType
+
+// Broadened query — all LogonTypes (returned 19, still incorrect)
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where LogonType == "RemoteInteractive"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| summarize count() by ActionType
+
+// Full breakdown — all LogonTypes and ActionTypes
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| summarize count() by ActionType, LogonType
+
+// Final correct query — Network + RemoteInteractive, Public IPs
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| summarize count() by ActionType, LogonType
+```
+
+**Final Results:**
+| ActionType | LogonType | Count |
+|------------|-----------|-------|
+| LogonFailed | Network | 646 |
+| LogonSuccess | Network | 21 |
+| LogonSuccess | RemoteInteractive | 8 |
+| **Total** | | **675** |
+
 
 ### 🖼️ Screenshot
 <Insert screenshot>
@@ -1433,7 +1528,44 @@ by DeviceName, country_name, country_iso_code
 ### 🛠️ Detection Recommendation
 
 **Hunting Tip:**  
-<Actionable guidance for defenders>
+- **Alert on any successful RemoteInteractive logon from a 
+  public IP** — this is a high-fidelity indicator of RDP 
+  compromise that should trigger immediate investigation:
+
+```kql
+// Alert — successful RDP logon from public IP
+DeviceLogonEvents
+| where LogonType == "RemoteInteractive"
+| where ActionType == "LogonSuccess"
+| where RemoteIPType == "Public"
+| where TimeGenerated > ago(1h)
+| project TimeGenerated, DeviceName, AccountName, 
+          RemoteIP, LogonType, ActionType
+```
+
+- **Implement Multi-Factor Authentication (MFA)** for all 
+  RDP access — valid credentials alone should not be 
+  sufficient for successful authentication
+- **Alert on high-volume LogonFailed events** from external 
+  IPs — 646 failures in a 14-day window should have triggered 
+  an automated alert:
+
+```kql
+// Alert — brute force detection
+DeviceLogonEvents
+| where ActionType == "LogonFailed"
+| where RemoteIPType == "Public"
+| where TimeGenerated > ago(1h)
+| summarize FailureCount = count() by RemoteIP, DeviceName
+| where FailureCount > 10
+```
+
+- **Enforce account lockout policies** — after a defined 
+  number of failed authentication attempts, the account 
+  should be locked and an alert triggered
+- **Implement Conditional Access policies** in Azure AD 
+  to block authentication attempts from unexpected 
+  geographic regions, particularly for privileged accounts
 
 </details>
 
