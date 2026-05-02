@@ -244,7 +244,12 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1543.003 | Create or Modify System Process: Windows Service | Persistence | 🔴 Critical |
 | T1574 | Hijack Execution Flow | Persistence / Defense Evasion | 🟠 High |
 | T1027 | Obfuscated Files or Information | Defense Evasion | 🟠 High |
-| 30 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 30 | | T1059.001 | Command and Scripting: PowerShell | Execution | 🔴 Critical |
+| T1071.001 | Application Layer Protocol: Web Protocols | C2 | 🔴 Critical |
+| T1095 | Non-Application Layer Protocol | C2 | 🔴 Critical |
+| T1055 | Process Injection | Defense Evasion / Privilege Escalation | 🔴 Critical |
+| T1562.001 | Impair Defenses: Disable or Modify Tools | Defense Evasion | 🔴 Critical |
+| T1588.001 | Obtain Capabilities: Malware | Resource Development | 🟠 High | 
 | 31 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 32 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 33 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -4442,34 +4447,206 @@ DeviceFileEvents
 <summary id="-flag-30">🚩 <strong>Flag 30: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify the malware family classification assigned to the 
+payload by Microsoft Defender's detection engine as recorded 
+in MDE telemetry on `azwks-phtg-02` — establishing the 
+threat category, capability set, and framework association 
+of the tool used by the threat actor in this intrusion.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `Meterpreter`**
+
+Microsoft Defender classified the payload under the malware 
+family **`Meterpreter`**, with the full threat name 
+`Trojan:Win32/Meterpreter.RPZ!MTB`. This is a Metasploit 
+Framework post-exploitation payload — one of the most 
+widely used offensive security tools in both red team 
+engagements and real-world threat actor campaigns.
+
+Defender detected the payload **three times** between 
+14:18 and 14:22 on 12 December 2025 — but was running 
+in **passive mode**, meaning it logged the detections 
+without blocking or quarantining the file.
+
+| Detection | Timestamp | ThreatName | ReportSource |
+|-----------|-----------|------------|--------------|
+| 1 | 12/12/2025 14:18:52 UTC | Trojan:Win32/Meterpreter.RPZ!MTB | Windows Defender Antivirus passive mode |
+| 2 | 12/12/2025 14:20:41 UTC | Trojan:Win32/Meterpreter.RPZ!MTB | Windows Defender Antivirus passive mode |
+| 3 | 12/12/2025 14:22:12 UTC | Trojan:Win32/Meterpreter.RPZ!MTB | Windows Defender Antivirus passive mode |
 
 ### 🔍 Evidence
-
 | Field | Value |
-|------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+|-------|-------|
+| Host | azwks-phtg-02 |
+| Malware Family | Meterpreter |
+| Full Threat Name | Trojan:Win32/Meterpreter.RPZ!MTB |
+| SHA256 | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 |
+| Detection Count | 3 |
+| Detection Window | 12/12/2025 14:18:52 – 14:22:12 UTC |
+| Defender Mode | Passive (detected, did not block) |
+| Report Source | Windows Defender Antivirus passive mode |
+| ActionType | AntivirusDetectionActionType |
+| Timestamp | 12/12/2025 14:18:52 UTC (first detection) |
+| Process | N/A — Antivirus detection event |
+| Parent Process | N/A — Antivirus detection event |
+| Command Line | N/A — Antivirus detection event |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The Meterpreter classification and passive mode context 
+are both critically significant findings:
+
+**Meterpreter as a malware family:**
+- **Metasploit Framework payload** — Meterpreter is the 
+  primary post-exploitation payload of the Metasploit 
+  Framework, providing attackers with an interactive 
+  shell, file system access, network pivoting, 
+  credential harvesting, and a broad library of 
+  post-exploitation modules
+- **In-memory execution capability** — Meterpreter 
+  is designed to run entirely in memory, leaving 
+  minimal forensic artifacts on disk. The fact that 
+  it was detected on disk (via the renamed `.exe`) 
+  suggests the threat actor was using a staged or 
+  stageless payload rather than a purely fileless 
+  deployment
+- **C2 over port 4444** — The subsequent 
+  `DeviceNetworkEvents` telemetry confirmed 
+  C2 callback attempts to `173.244.55.130:4444` — 
+  the default Metasploit listener port — consistent 
+  with an out-of-the-box Meterpreter configuration
+- **Commodity tooling** — The use of Meterpreter 
+  rather than custom malware suggests a threat 
+  actor operating at the lower end of the 
+  sophistication spectrum, relying on widely 
+  available offensive tooling. This is consistent 
+  with the opportunistic brute force initial 
+  access methodology observed earlier in the chain
+
+**Passive mode as a critical defensive gap:**
+- **Detected but not blocked** — Defender identified 
+  the Meterpreter payload within 14 seconds of the 
+  rename event but took no blocking action due to 
+  passive mode operation
+- **Three detections, zero blocks** — The same 
+  payload was detected three times in four minutes 
+  with no remediation action taken
+- **Passive mode is a deployment configuration** — 
+  Defender runs in passive mode when another AV 
+  product is designated as the primary protection 
+  engine. If no other AV was present, passive 
+  mode represents a critical misconfiguration 
+  that nullified Defender's detection capability
+- **This single misconfiguration enabled the 
+  entire post-exploitation chain** — Active 
+  mode would have quarantined the payload 
+  before first execution, preventing all 
+  subsequent Meterpreter activity
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Query MDE DeviceEvents for Defender antivirus 
+// detections against the payload SHA256
+DeviceEvents
+| where DeviceName == "azwks-phtg-02"
+| where ActionType in ("AntivirusDetection", 
+                       "AntivirusDetectionActionType")
+| where SHA256 == "224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695"
+| project TimeGenerated, ActionType, SHA256, AdditionalFields
+```
+
+**Results:**
+| TimeGenerated | ActionType | AdditionalFields |
+|---------------|------------|-----------------|
+| 12/12/2025 14:18:52 | AntivirusDetectionActionType | {"ThreatName":"Trojan:Win32/Meterpreter.RPZ!MTB","ReportSource":"Windows Defender Antivirus passive mode"} |
+| 12/12/2025 14:20:41 | AntivirusDetectionActionType | {"ThreatName":"Trojan:Win32/Meterpreter.RPZ!MTB","ReportSource":"Windows Defender Antivirus passive mode"} |
+| 12/12/2025 14:22:12 | AntivirusDetectionActionType | {"ThreatName":"Trojan:Win32/Meterpreter.RPZ!MTB","ReportSource":"Windows Defender Antivirus passive mode"} |
+
+```kql
+// Parse AdditionalFields JSON to extract ThreatName 
+// and malware family cleanly
+DeviceEvents
+| where DeviceName == "azwks-phtg-02"
+| where ActionType in ("AntivirusDetection", 
+                       "AntivirusDetectionActionType")
+| where SHA256 == "224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695"
+| extend ParsedFields = parse_json(AdditionalFields)
+| extend ThreatName = tostring(ParsedFields.ThreatName)
+| extend ReportSource = tostring(ParsedFields.ReportSource)
+| project TimeGenerated, ActionType, ThreatName, 
+          ReportSource, SHA256
+```
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+three AntivirusDetectionActionType events for the payload 
+SHA256, with ThreatName Trojan:Win32/Meterpreter.RPZ!MTB 
+and ReportSource Windows Defender Antivirus passive mode>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Immediately switch Microsoft Defender from 
+  passive mode to active mode** on all PHTG 
+  endpoints — passive mode provides zero 
+  protection against detected threats:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Hunt for other endpoints running Defender 
+// in passive mode with antivirus detections
+DeviceEvents
+| where ActionType == "AntivirusDetectionActionType"
+| where TimeGenerated > ago(30d)
+| extend ParsedFields = parse_json(AdditionalFields)
+| extend ReportSource = tostring(ParsedFields.ReportSource)
+| where ReportSource contains "passive mode"
+| summarize 
+    DetectionCount = count(),
+    UniqueThreat = dcount(SHA256),
+    Threats = make_set(tostring(ParsedFields.ThreatName))
+    by DeviceName, ReportSource
+| order by DetectionCount desc
+```
+
+- **Alert on any `AntivirusDetectionActionType` event 
+  with `ReportSource` containing "passive mode"** — 
+  this combination means a threat was detected but 
+  not blocked, requiring immediate manual investigation:
+
+```kql
+// Alert — AV detection in passive mode (no blocking)
+DeviceEvents
+| where ActionType == "AntivirusDetectionActionType"
+| where TimeGenerated > ago(1h)
+| extend ParsedFields = parse_json(AdditionalFields)
+| extend ThreatName = tostring(ParsedFields.ThreatName)
+| extend ReportSource = tostring(ParsedFields.ReportSource)
+| where ReportSource contains "passive"
+| project TimeGenerated, DeviceName, ThreatName, 
+          ReportSource, SHA256
+```
+
+- **Alert on Meterpreter family detections specifically** — 
+  Meterpreter is never a false positive in a production 
+  environment:
+
+```kql
+// Alert — Meterpreter detection (any mode)
+DeviceEvents
+| where ActionType in ("AntivirusDetection", 
+                       "AntivirusDetectionActionType")
+| where TimeGenerated > ago(1h)
+| extend ParsedFields = parse_json(AdditionalFields)
+| extend ThreatName = tostring(ParsedFields.ThreatName)
+| where ThreatName contains "Meterpreter"
+| project TimeGenerated, DeviceName, ThreatName, SHA256
+```
+
+- **Audit Defender configuration across the PHTG 
+  estate** — identify all endpoints where Defender 
+  is running in passive mode and remediate 
+  immediately. Active mode with real-time 
+  protection enabled should be the standard 
+  configuration on all endpoints without a 
+  third-party AV product designated as primary
 
 </details>
 
