@@ -153,7 +153,12 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1078 | Valid Accounts | Defense Evasion / Initial Access | 🔴 Critical | 
 | T1133 | External Remote Services | Initial Access | 🔴 Critical |
 | T1021.001 | Remote Services: Remote Desktop Protocol | Lateral Movement |
-| 13 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 13 | | T1110.001 | Brute Force: Password Guessing | Credential Access | 🔴 Critical | 
+| T1110.003 | Brute Force: Password Spraying | Credential Access | 🔴 Critical |
+| T1110 | Brute Force | Credential Access | 🔴 Critical | 
+| T1078 | Valid Accounts | Defense Evasion / Initial Access | 🔴 Critical | 
+| T1133 | External Remote Services | Initial Access | 🔴 Critical |
+| T1021.001 | Remote Services: Remote Desktop Protocol | Lateral Movement | 🔴 Critical |
 | 14 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 15 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 16 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -1575,26 +1580,112 @@ DeviceLogonEvents
 <summary id="-flag-13">🚩 <strong>Flag 13: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Narrow the authentication event scope specifically to Remote Desktop 
+Protocol (RDP) related logon activity originating from external public 
+IP addresses against `azwks-phtg-02`. This isolates RDP-specific 
+authentication events from the broader pool of external logon activity 
+to focus the investigation on the confirmed attack vector.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: 675**
+
+All 675 externally sourced authentication events were RDP-related, 
+captured by filtering on `LogonType in ("RemoteInteractive", "Network")` 
+combined with `RemoteIPType == "Public"`. The breakdown confirms that 
+all external authentication activity against this device was associated 
+with RDP — there were no other external authentication vectors observed.
+
+| ActionType | LogonType | Count |
+|------------|-----------|-------|
+| LogonFailed | Network | 646 |
+| LogonSuccess | Network | 21 |
+| LogonSuccess | RemoteInteractive | 8 |
+| **Total** | | **675** |
+
+> **Investigative Note:** RDP authentication in MDE 
+> `DeviceLogonEvents` manifests across two LogonTypes:
+> - **RemoteInteractive** — Full interactive RDP desktop 
+>   sessions (the classic RDP logon type)
+> - **Network** — RDP pre-authentication and NLA 
+>   (Network Level Authentication) credential validation, 
+>   which occurs before a full desktop session is established
+>
+> Both LogonTypes must be included to capture the complete 
+> picture of RDP-related authentication activity. Filtering 
+> on `RemoteInteractive` alone significantly undercounts 
+> the true volume of RDP authentication attempts.
+
 
 ### 🔍 Evidence
 
 | Field | Value |
 |------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+| Host | azwks-phtg-02 |
+| Total RDP Auth Events | 675 |
+| LogonFailed (Network) | 646 |
+| LogonSuccess (Network) | 21 |
+| LogonSuccess (RemoteInteractive) | 8 |
+| LogonTypes Included | RemoteInteractive, Network |
+| RemoteIPType Filter | Public |
+| Investigation Window | 09 December – 23 December 2025 UTC |
+| Timestamp | 09 December 2025 – 23 December 2025 UTC |
+| Process | N/A — Authentication telemetry, no process execution |
+| Parent Process | N/A — Authentication telemetry, no process execution |
+| Command Line | N/A — Authentication telemetry, no process execution |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+Understanding that **all 675 external authentication events were 
+RDP-related** is a critical finding because:
+
+- **Single attack vector** — The threat actor exclusively used 
+  RDP as their entry point. No other external authentication 
+  methods (VPN, web application, API) were observed, confirming 
+  RDP as the sole attack surface exploited
+- **NLA pre-authentication captures the full brute force volume** 
+  — The 646 `Network` logon failures represent RDP NLA 
+  pre-authentication rejections. Without including this LogonType, 
+  the true scale of the brute force campaign is invisible
+- **LogonType matters for detection tuning** — Security teams 
+  that only alert on `RemoteInteractive` failures would have 
+  missed 646 of the 675 authentication events entirely, 
+  dramatically underestimating the attack scope
+- **The 8 RemoteInteractive successes are the crown jewels** — 
+  These represent full interactive desktop sessions established 
+  by the threat actor, confirmed hands-on-keyboard access to 
+  the compromised endpoint
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// RDP-related external authentication events
+// Includes both RemoteInteractive (full RDP sessions) and
+// Network (NLA pre-authentication) logon types
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| summarize count() by ActionType, LogonType
+```
+
+**Results:**
+| ActionType | LogonType | Count |
+|------------|-----------|-------|
+| LogonFailed | Network | 646 |
+| LogonSuccess | Network | 21 |
+| LogonSuccess | RemoteInteractive | 8 |
+| **Total** | | **675** |
+
+```kql
+// Single total count
+DeviceLogonEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated between (datetime(2025-12-09) .. datetime(2025-12-23))
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| summarize count()
+```
+
+**Result: 675**
 
 ### 🖼️ Screenshot
 <Insert screenshot>
@@ -1602,7 +1693,43 @@ DeviceLogonEvents
 ### 🛠️ Detection Recommendation
 
 **Hunting Tip:**  
-<Actionable guidance for defenders>
+- **Always include both `RemoteInteractive` and `Network` LogonTypes** 
+  when hunting for RDP authentication activity in MDE — filtering 
+  on `RemoteInteractive` alone misses the NLA pre-authentication 
+  layer where the majority of brute force failures are recorded
+- **Create a composite RDP authentication dashboard** in Sentinel 
+  that shows failures and successes across both LogonTypes in 
+  a single view:
+
+```kql
+// RDP authentication dashboard query
+DeviceLogonEvents
+| where LogonType in ("RemoteInteractive", "Network")
+| where RemoteIPType == "Public"
+| where TimeGenerated > ago(24h)
+| summarize 
+    TotalAttempts = count(),
+    Failures = countif(ActionType == "LogonFailed"),
+    Successes = countif(ActionType == "LogonSuccess"),
+    UniqueSourceIPs = dcount(RemoteIP),
+    UniqueAccounts = dcount(AccountName)
+    by DeviceName, bin(TimeGenerated, 1h)
+| order by TotalAttempts desc
+```
+
+- **Alert immediately on any `LogonSuccess` with 
+  `LogonType == "RemoteInteractive"` from a public IP** — 
+  this is a confirmed RDP session from an external source 
+  and should be treated as a critical incident until proven otherwise
+- **Implement Network Level Authentication (NLA)** on all 
+  RDP-enabled endpoints — while NLA does not prevent brute 
+  force, it does require credential validation before 
+  establishing a full desktop session, reducing the attack 
+  surface and improving the fidelity of Network logon 
+  failure telemetry
+- **Consider deploying an RDP honeypot** alongside production 
+  assets to collect attacker credential lists and TTPs 
+  without exposing real infrastructure
 
 </details>
 
