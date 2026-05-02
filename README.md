@@ -219,7 +219,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1059 | Command and Scripting Interpreter | Execution | 🔴 Critical |
 | T1021.001 | Remote Services: Remote Desktop Protocol | Lateral Movement | 🔴 Critical |
 | T1078.003 | Valid Accounts: Local Accounts | Defense Evasion | 🔴 Critical | 
-| 25 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 25 | | T1005 | Data from Local System | Collection | 🔴 Critical |
+| T1083 | File and Directory Discovery | Discovery | 🟠 High |
+| T1552.001 | Unsecured Credentials: Credentials in Files | Credential Access | 🔴 Critical |
+| T1213 | Data from Information Repositories | Collection | 🟠 High |
+| T1074.001 | Data Staged: Local Data Staging | Collection | 🟠 High |
 | 26 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 27 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 28 | <Placeholder> | <Placeholder> | <Placeholder> |
@@ -3528,35 +3532,158 @@ DeviceProcessEvents
 <summary id="-flag-25">🚩 <strong>Flag 25: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Identify which text file opened during the threat actor's session 
+on `azwks-phtg-02` contained internal security-relevant content 
+that would provide meaningful intelligence to an attacker — 
+reducing their effort for further exploitation, lateral movement, 
+or privilege escalation within the PHTG environment.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `notes_sarah.txt`**
+
+During the threat actor's interactive session, multiple text 
+files were opened via `notepad.exe`. The file 
+**`notes_sarah.txt`** — located at 
+`C:\Users\vmAdminUsername\Documents\PHTG\notes_sarah.txt` — 
+contained internal security-relevant content attributed to 
+Sarah Chen, the Cloud Engineer whose LinkedIn post triggered 
+this entire investigation. An attacker reviewing this file 
+would gain direct insider knowledge of PHTG's infrastructure, 
+credentials, or operational details — significantly reducing 
+the effort required for further exploitation.
 
 ### 🔍 Evidence
-
 | Field | Value |
-|------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+|-------|-------|
+| Host | azwks-phtg-02 |
+| Security-Relevant File | notes_sarah.txt |
+| Full Path | C:\Users\vmAdminUsername\Documents\PHTG\notes_sarah.txt |
+| Opened By | notepad.exe |
+| Account | vmadminusername |
+| File Author Context | Sarah Chen — Cloud Engineer, PHTG |
+| Significance | Internal notes containing security-relevant content |
+| Investigation Window | 09 December – 23 December 2025 UTC |
+| Process | notepad.exe |
+| Parent Process | cmd.exe / explorer.exe |
+| Command Line | notepad.exe notes_sarah.txt |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The discovery and review of `notes_sarah.txt` by the threat 
+actor is one of the most operationally significant findings 
+in this investigation:
+
+- **Sarah Chen is the source of the initial exposure** — 
+  The LinkedIn post that triggered this investigation 
+  was made by Sarah Chen, a Cloud Engineer at PHTG. 
+  The existence of a file bearing her name on the 
+  compromised VM — containing internal notes — creates 
+  a direct link between the OSINT phase and the 
+  post-exploitation phase
+- **Internal notes represent high-value intelligence** — 
+  Engineer notes typically contain infrastructure 
+  details, credentials, configuration snippets, 
+  access procedures, or operational context that 
+  would not be available through external reconnaissance. 
+  An attacker reviewing these notes gains the 
+  equivalent of insider knowledge
+- **The file's existence on a shared VM is itself 
+  an OPSEC failure** — Sensitive operational notes 
+  should never be stored in plaintext on a VM 
+  accessible via public-facing RDP. The presence 
+  of this file on `azwks-phtg-02` represents a 
+  secondary OPSEC failure compounding the initial 
+  LinkedIn post exposure
+- **The attacker's decision to open this file 
+  indicates deliberate intelligence gathering** — 
+  Opening `notes_sarah.txt` was not accidental. 
+  The threat actor was actively searching for 
+  and reviewing internal documentation to 
+  accelerate their objectives — consistent with 
+  the discovery and collection phases of the 
+  ATT&CK framework
+- **This file may have enabled lateral movement** — 
+  If `notes_sarah.txt` contained credentials, 
+  system access procedures, or network details, 
+  the attacker would have gained everything 
+  needed to move laterally within the PHTG 
+  environment beyond `azwks-phtg-02`
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// Identify text files opened during threat actor sessions
+DeviceProcessEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated >= datetime(2025-12-12T05:47:45Z)
+| where InitiatingProcessAccountName =~ "vmadminusername"
+| where FileName == "notepad.exe"
+| project TimeGenerated, FileName, ProcessCommandLine,
+          InitiatingProcessFileName, InitiatingProcessCommandLine
+| order by TimeGenerated asc
+```
+
+```kql
+// Cross-reference with FileEvents to identify 
+// files accessed during the session
+DeviceFileEvents
+| where DeviceName == "azwks-phtg-02"
+| where TimeGenerated >= datetime(2025-12-12T05:47:45Z)
+| where InitiatingProcessAccountName =~ "vmadminusername"
+| where FileName endswith ".txt"
+| project TimeGenerated, FileName, FolderPath, 
+          ActionType, InitiatingProcessAccountName
+| order by TimeGenerated asc
+```
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+notepad.exe opening notes_sarah.txt during the threat actor 
+session, with full path 
+C:\Users\vmAdminUsername\Documents\PHTG\notes_sarah.txt>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Never store sensitive notes, credentials, or 
+  operational documentation in plaintext files on 
+  shared or internet-facing infrastructure** — use 
+  a secrets management solution (Azure Key Vault, 
+  HashiCorp Vault) for credentials and a secure 
+  document management system for operational notes
+- **Alert on access to sensitive file paths during 
+  externally-sourced RDP sessions**:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Alert — sensitive file access during external RDP session
+let RDPSessions =
+    DeviceLogonEvents
+    | where LogonType == "RemoteInteractive"
+    | where ActionType == "LogonSuccess"
+    | where RemoteIPType == "Public"
+    | project LogonTime = TimeGenerated,
+              DeviceName, AccountName;
+DeviceProcessEvents
+| where FileName == "notepad.exe"
+| where ProcessCommandLine contains "Documents"
+| join kind=inner RDPSessions on DeviceName, AccountName
+| where TimeGenerated > LogonTime
+| project TimeGenerated, DeviceName, AccountName,
+          ProcessCommandLine
+```
 
+- **Implement Data Loss Prevention (DLP) policies** 
+  to detect and alert on access to files containing 
+  sensitive keywords (passwords, credentials, keys, 
+  secrets) on endpoint devices
+- **Conduct a sensitive data discovery sweep** across 
+  all PHTG endpoints to identify other plaintext 
+  files containing credentials, infrastructure 
+  details, or operational notes that could be 
+  accessed by a threat actor with local 
+  administrator privileges
+- **Apply file access auditing** to sensitive 
+  directories — enable Windows auditing on 
+  `C:\Users\*\Documents\PHTG\` to log and 
+  alert on any file access events from 
+  unexpected accounts or processes
 </details>
 
 ---
