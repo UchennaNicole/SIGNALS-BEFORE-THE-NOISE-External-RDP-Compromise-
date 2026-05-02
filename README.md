@@ -275,7 +275,11 @@ Answer what happened, why it matters, and what was discovered in 3–4 sentences
 | T1043 | Commonly Used Port | Command and Control | 🟠 High |
 | T1583.003 | Acquire Infrastructure: Virtual Private Server | Resource Development | 🟠 High |
 | T1008 | Fallback Channels | Command and Control | 🟠 High |
-| 36 | <Placeholder> | <Placeholder> | <Placeholder> |
+| 36 | | T1583.003 | Acquire Infrastructure: Virtual Private Server | Resource Development | 🟠 High |
+| T1583 | Acquire Infrastructure | Resource Development | 🟠 High |
+| T1095 | Non-Application Layer Protocol | Command and Control | 🔴 Critical |
+| T1090.003 | Proxy: Multi-hop Proxy | Defense Evasion | 🟠 High |
+| T1008 | Fallback Channels | Command and Control | 🟠 High |
 | 37 | <Placeholder> | <Placeholder> | <Placeholder> |
 | 38 | <Placeholder> | <Placeholder> | <Placeholder> |
 ---
@@ -5750,34 +5754,214 @@ DeviceNetworkEvents
 <summary id="-flag-36">🚩 <strong>Flag 36: <Technique Name></strong></summary>
 
 ### 🎯 Objective
-<What the attacker was trying to accomplish>
+Geographically attribute the Meterpreter C2 infrastructure 
+to a specific country and continent — confirming the physical 
+location of the threat actor's command and control server 
+and completing the full geographic attribution of the 
+attack infrastructure identified throughout this investigation.
 
 ### 📌 Finding
-<High-level description of the activity>
+**Answer: `Uruguay, South America`**
+
+The C2 IP `173.244.55.130` is geolocated to **Uruguay**, 
+located on the continent of **South America**. This finding 
+is consistent with the GeoIP enrichment of the RDP access 
+IPs (`173.244.55.128` and `173.244.55.131`) performed 
+earlier in the investigation — all three IPs in the 
+`173.244.55.0/24` subnet are attributed to Uruguay, 
+confirming a single, geographically cohesive threat 
+actor infrastructure block.
+
+**Complete Threat Actor Infrastructure Attribution:**
+
+| IP Address | Role | Country | Continent |
+|------------|------|---------|-----------|
+| 173.244.55.128 | RDP Access (secondary) | Uruguay | South America |
+| 173.244.55.130 | Meterpreter C2 | Uruguay | South America |
+| 173.244.55.131 | RDP Access (primary) | Uruguay | South America |
 
 ### 🔍 Evidence
-
 | Field | Value |
-|------|-------|
-| Host | <Placeholder> |
-| Timestamp | <Placeholder> |
-| Process | <Placeholder> |
-| Parent Process | <Placeholder> |
-| Command Line | <Placeholder> |
+|-------|-------|
+| Host | azwks-phtg-02 |
+| C2 IP | 173.244.55.130 |
+| C2 Port | 4444 |
+| Country | Uruguay |
+| Continent | South America |
+| Subnet | 173.244.55.0/24 |
+| All Subnet IPs Geolocated To | Uruguay, South America |
+| GeoIP Dataset | GeoIP2 IPv4 (via GitHub raw CSV) |
+| PHTG Operating Region | United States, North America |
+| Timestamp | 12/12/2025 – 12/13/2025 UTC |
+| Process | sarah_chen_notes.exe / phtg.exe |
+| Parent Process | explorer.exe / cmd.exe |
+| Command Line | N/A — Geographic enrichment |
 
 ### 💡 Why it matters
-<Explain impact, risk, and relevance>
+The geographic attribution of the C2 infrastructure to 
+Uruguay, South America is a critical investigative and 
+strategic finding:
+
+- **Full subnet attribution to a single country** — 
+  All three confirmed threat actor IPs 
+  (`173.244.55.128`, `173.244.55.130`, `173.244.55.131`) 
+  geolocate to Uruguay. This is not coincidental — 
+  it confirms the threat actor operated exclusively 
+  from a dedicated infrastructure block in Uruguay 
+  throughout the entire attack chain:
+  - **Reconnaissance** — Scanning from Uruguay
+  - **Initial Access** — RDP brute force from Uruguay
+  - **Persistence** — Repeated RDP sessions from Uruguay
+  - **C2** — Meterpreter callback target in Uruguay
+
+- **Zero legitimate connection to PHTG operations** — 
+  PHTG operates exclusively in the United States 
+  (North America). Uruguay (South America) has 
+  absolutely no legitimate role in PHTG's business 
+  operations, making every piece of infrastructure 
+  in this subnet definitively hostile
+
+- **Geographic attribution enables threat intelligence 
+  correlation** — Uruguay-based hosting infrastructure 
+  used for Meterpreter C2 with adjacent IPs used for 
+  RDP brute force is a specific enough pattern to 
+  search for in threat intelligence databases and 
+  correlate against other known campaigns
+
+- **The complete kill chain is now geographically 
+  unified** — From the LinkedIn post exposure 
+  through to the C2 callback attempt, every 
+  malicious action in this investigation 
+  traces back to the `173.244.55.0/24` subnet 
+  in Uruguay, South America — providing 
+  definitive infrastructure attribution for 
+  the entire intrusion
+
+- **Continent-level attribution matters for 
+  policy decisions** — PHTG can implement 
+  continent-level geographic blocking for 
+  South America at the NSG and firewall 
+  level, eliminating the entire class of 
+  threat infrastructure used in this attack
 
 ### 🔧 KQL Query Used
-<Add KQL here>
+```kql
+// GeoIP enrichment of C2 IP to confirm 
+// country and continent attribution
+let GeoTable =
+    externaldata(network:string, geoname_id:long, 
+                 continent_code:string, 
+                 continent_name:string, 
+                 country_iso_code:string, 
+                 country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+let C2IP = datatable(RemoteIP:string)["173.244.55.130"];
+C2IP
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| project RemoteIP, country_name, continent_name,
+          country_iso_code, continent_code
+```
+
+**Result:**
+| RemoteIP | country_name | continent_name |
+|----------|-------------|----------------|
+| 173.244.55.130 | Uruguay | South America |
+
+```kql
+// Full subnet attribution — confirm all three 
+// threat actor IPs geolocate to same country
+let GeoTable =
+    externaldata(network:string, geoname_id:long, 
+                 continent_code:string, 
+                 continent_name:string, 
+                 country_iso_code:string, 
+                 country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+let ThreatActorIPs = datatable(RemoteIP:string)
+[
+    "173.244.55.128",
+    "173.244.55.130",
+    "173.244.55.131"
+];
+ThreatActorIPs
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| project RemoteIP, country_name, continent_name,
+          country_iso_code, continent_code
+```
+
+**Results:**
+| RemoteIP | country_name | continent_name |
+|----------|-------------|----------------|
+| 173.244.55.128 | Uruguay | South America |
+| 173.244.55.130 | Uruguay | South America |
+| 173.244.55.131 | Uruguay | South America |
 
 ### 🖼️ Screenshot
-<Insert screenshot>
+<Insert screenshot of Microsoft Sentinel query results showing 
+GeoIP enrichment of 173.244.55.130 returning Uruguay, 
+South America — alongside the full subnet enrichment 
+confirming all three threat actor IPs geolocate to 
+the same country and continent>
 
 ### 🛠️ Detection Recommendation
+**Hunting Tip:**
+- **Implement continent-level geographic blocking** — 
+  since PHTG has no legitimate operations in South 
+  America, blocking all inbound and outbound 
+  connections to/from South American IP ranges 
+  at the Azure NSG level would have prevented 
+  every malicious action in this investigation:
 
-**Hunting Tip:**  
-<Actionable guidance for defenders>
+```kql
+// Ongoing monitoring — any connection to/from 
+// South American IP ranges
+let GeoTable =
+    externaldata(network:string, geoname_id:long, 
+                 continent_code:string, 
+                 continent_name:string, 
+                 country_iso_code:string, 
+                 country_name:string)
+    [@"https://raw.githubusercontent.com/datasets/geoip2-ipv4/main/data/geoip2-ipv4.csv"]
+    with (format="csv");
+DeviceNetworkEvents
+| where TimeGenerated > ago(24h)
+| where RemoteIPType == "Public"
+| evaluate ipv4_lookup(GeoTable, RemoteIP, network)
+| where continent_code == "SA"
+| summarize 
+    EventCount = count(),
+    UniqueIPs = dcount(RemoteIP),
+    Processes = make_set(InitiatingProcessFileName)
+    by DeviceName, country_name, continent_name
+| order by EventCount desc
+```
+
+- **Block the entire `173.244.55.0/24` subnet 
+  immediately** — with all three confirmed 
+  malicious IPs in this block, the entire 
+  /24 should be permanently blocklisted:
+  - Azure NSG inbound rule: Deny `173.244.55.0/24`
+  - Azure NSG outbound rule: Deny `173.244.55.0/24`
+  - Firewall blocklist: Add `173.244.55.0/24`
+  - EDR network blocklist: Add all three IPs
+
+- **Document the complete Indicators of 
+  Compromise (IOCs) for this investigation:**
+
+| IOC Type | Value | Context |
+|----------|-------|---------|
+| IP Address | 173.244.55.128 | RDP access — Uruguay |
+| IP Address | 173.244.55.130 | Meterpreter C2 — Uruguay |
+| IP Address | 173.244.55.131 | RDP access — Uruguay |
+| CIDR Block | 173.244.55.0/24 | Full threat actor subnet |
+| SHA256 | 224462ce5e3304e3fd0875eeabc829810a894911e3d4091d4e60e67a2687e695 | Meterpreter payload |
+| File Path | C:\ProgramData\PHTG\HealthCloud\PHTG.exe | Final payload location |
+| File Path | C:\ProgramData\PHTG\HealthCloud\Launch.bat | Persistence mechanism |
+| Account | vmadminusername | Compromised account |
+| Port | 4444/TCP | Meterpreter C2 port |
+| Country | Uruguay | Threat actor location |
 
 </details>
 
